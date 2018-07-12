@@ -562,15 +562,25 @@ module.exports = class binance extends Exchange {
             'symbol': market['id'],
         };
         if (typeof since !== 'undefined') {
+            // Binance only allows a max of 1 hour span
+            // ***NOTE***
+            // If `limit` and `since` is sent to the API, you may end up missing
+            // results as the limit counts from the endTime backwards. So
+            // you'll get the most recent 100 trades, for example.
+            //
+            // Typically, with other APIs, you would expect to get X trades from
+            // the startTime, and ignore the endTime, which would allow you
+            // to loop, and pass the newest trade time as `since`.
+            // But that is not the case.
+            //
+            // It appears the API is intended to be used with
+            // (startTime && endTime) OR limit.   Not both.
             request['startTime'] = since;
-            request['endTime'] = since + 3600000;
-        }
-        if (typeof limit !== 'undefined')
+            request['endTime'] = since + (3600000);
+        } else if (typeof limit !== 'undefined'){
             request['limit'] = limit;
-        // 'fromId': 123,    // ID to get aggregate trades from INCLUSIVE.
-        // 'startTime': 456, // Timestamp in ms to get aggregate trades from INCLUSIVE.
-        // 'endTime': 789,   // Timestamp in ms to get aggregate trades until INCLUSIVE.
-        // 'limit': 500,     // default = maximum = 500
+        }
+
         let response = await this.publicGetAggTrades (this.extend (request, params));
         return this.parseTrades (response, market, since, limit);
     }
