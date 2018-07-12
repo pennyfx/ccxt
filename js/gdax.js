@@ -318,9 +318,14 @@ module.exports = class gdax extends Exchange {
     async fetchTrades (symbol, since = undefined, limit = undefined, params = {}) {
         await this.loadMarkets ();
         let market = this.market (symbol);
-        let response = await this.publicGetProductsIdTrades (this.extend ({
-            'id': market['id'], // fixes issue #2
-        }, params));
+        let request = {
+            'id': market['id']
+        };
+        if (since){
+            // `since` does not work as expected because coinbase/gdax uses very odd pagination semantics
+            //  https://docs.pro.coinbase.com/#pagination
+        }
+        let response = await this.publicGetProductsIdTrades (this.extend (request, params));
         return this.parseTrades (response, market, since, limit);
     }
 
