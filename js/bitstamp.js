@@ -347,9 +347,14 @@ module.exports = class bitstamp extends Exchange {
     async fetchTrades (symbol, since = undefined, limit = undefined, params = {}) {
         await this.loadMarkets ();
         let market = this.market (symbol);
+        let timeInterval = 'hour';
+        if (since){
+            let diff = new Date() - (since || 0);
+            timeInterval = diff > 60 * 60 * 1000 ? 'day' : diff > 60 * 1000 ? 'hour' : 'minute';
+        }
         let response = await this.publicGetTransactionsPair (this.extend ({
             'pair': market['id'],
-            'time': 'hour',
+            'time': timeInterval,
         }, params));
         return this.parseTrades (response, market, since, limit);
     }
