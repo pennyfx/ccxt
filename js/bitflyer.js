@@ -221,11 +221,14 @@ module.exports = class bitflyer extends Exchange {
         };
     }
 
-    async fetchTrades (symbol, since = undefined, limit = undefined, params = {}) {
+    async fetchTrades (symbol, since = undefined, limit = 100, params = {}) {
         await this.loadMarkets ();
         let market = this.market (symbol);
+        // https://lightning.bitflyer.com/docs?lang=en#pagination
+        // `since` doesn't work because they use a trade id as the offset for paging
         let response = await this.publicGetGetexecutions (this.extend ({
             'product_code': market['id'],
+            'count': limit
         }, params));
         return this.parseTrades (response, market, since, limit);
     }
