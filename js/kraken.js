@@ -567,22 +567,21 @@ module.exports = class kraken extends Exchange {
     }
 
     async fetchTrades (symbol, since = undefined, limit = undefined, params = {}) {
+        // `limit` is not respected by the API call, but is used in
+        // this.parseTrades to limit the number of results
         await this.loadMarkets ();
         let market = this.market (symbol);
-        let id = market['id'];
-        let response = await this.publicGetTrades (this.extend ({
-            'pair': id,
-        }, params));
-        // { result: { marketid: [ ... trades ] }, last: "last_trade_id"}
-        let result = response['result'];
-        let trades = result[id];
-        // trades is a sorted array: last (most recent trade) goes last
-        let length = trades.length;
-        if (length <= 0)
-            return [];
-        let lastTrade = trades[length - 1];
-        let lastTradeId = this.safeString (result, 'last');
-        lastTrade.push (lastTradeId);
+        let symbol_id = market['id'];
+        let request = {
+            'pair': symbol_id,
+        }
+        if (since){
+            // Kraken uses high precision timestamps for "since" offset
+            // convert unix timestamp to Kraken
+            request['since'] = since * 1000000;
+        }
+        let response = await this.publicGetTrades (this.extend (request, params));
+        let trades = response['result'][symbol_id];
         return this.parseTrades (trades, market, since, limit);
     }
 
