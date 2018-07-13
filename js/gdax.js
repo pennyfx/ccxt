@@ -623,10 +623,61 @@ module.exports = class gdax extends Exchange {
     }
 
     async request (path, api = 'public', method = 'GET', params = {}, headers = undefined, body = undefined) {
-        let response = await this.fetch2 (path, api, method, params, headers, body);
-        if ('message' in response) {
-            throw new ExchangeError (this.id + ' ' + this.json (response));
+        if (params.limit){
+            // if limit is defined for GDAX, then we need to interate by passing the cb_after header value.
+            var limit = params.limit;
+            delete params['limit'];
+            return this.fetchPages(limit, this.fetch2, [path, api, method, params, headers, body]);
+        } else {
+            let response = await this.fetch2 (path, api, method, params, headers, body);
+            if ('message' in response) {
+                throw new ExchangeError (this.id + ' ' + this.json (response));
+            }
+            return response;
         }
-        return response;
+
     }
+
+
+    fetchPages(desired_results_length, fn, args){
+        // if `limit` is defined for this request, then we need to
+        // interate by passing the cb_after header value.
+        var total_results = [];
+        var inside_fn = (cb_after) => {
+            if (cb_after){
+                args[3]['after'] = cb_after;
+            }
+            return fn.apply(this, args)
+            .then(response => {
+                if ('message' in response) {
+                    throw new ExchangeError (this.id + ' ' + this.json (response));
+                }
+                total_results = total_results.concat(response);
+                // if we haven't reached the desired result length yet AND cb_after is defined,
+                // make another call.
+                if (total_results.length < desired_results_length && response._cb_after){
+                    return inside_fn(response._cb_after);
+                } else {
+                    return total_results;
+                }
+            });
+        }
+        return inside_fn();
+    }
+
+    handleRestResponse (response, url, method = 'GET', requestHeaders = undefined, requestBody = undefined) {
+
+        // modify the default behavior by adding the cb-after value to the response.
+        return super.handleRestResponse.call(this,...arguments)
+        .then(result => {
+            let cb_after = response.headers._headers['cb-after'];
+            if (cb_after){
+                // result is an array, but that doesn't matter, we can append properties at will.
+                result._cb_after = cb_after[0];
+            }
+            return result;
+        })
+    }
+
+
 };
