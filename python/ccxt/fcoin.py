@@ -14,7 +14,6 @@ except NameError:
 import base64
 import hashlib
 import math
-import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import AuthenticationError
 from ccxt.base.errors import InsufficientFunds
@@ -31,7 +30,7 @@ class fcoin (Exchange):
         return self.deep_extend(super(fcoin, self).describe(), {
             'id': 'fcoin',
             'name': 'FCoin',
-            'countries': 'CN',
+            'countries': ['CN'],
             'rateLimit': 2000,
             'userAgent': self.userAgents['chrome39'],
             'version': 'v2',
@@ -41,7 +40,7 @@ class fcoin (Exchange):
             'has': {
                 'CORS': False,
                 'fetchDepositAddress': False,
-                'fetchOHCLV': False,
+                'fetchOHLCV': True,
                 'fetchOpenOrders': True,
                 'fetchClosedOrders': True,
                 'fetchOrder': True,
@@ -112,6 +111,7 @@ class fcoin (Exchange):
                 'amount': {'min': 0.01, 'max': 100000},
             },
             'options': {
+                'createMarketBuyOrderRequiresPrice': True,
                 'limits': {
                     'BTM/USDT': {'amount': {'min': 0.1, 'max': 10000000}},
                     'ETC/USDT': {'amount': {'min': 0.001, 'max': 400000}},
@@ -139,9 +139,13 @@ class fcoin (Exchange):
                 '6004': InvalidNonce,
                 '6005': AuthenticationError,  # Illegal API Signature
             },
+            'commonCurrencies': {
+                'DAG': 'DAGX',
+                'PAI': 'PCHAIN',
+            },
         })
 
-    def fetch_markets(self):
+    def fetch_markets(self, params={}):
         response = self.publicGetSymbols()
         result = []
         markets = response['data']
@@ -211,8 +215,8 @@ class fcoin (Exchange):
             priceField = self.sum(index, priceKey)
             amountField = self.sum(index, amountKey)
             result.append([
-                orders[priceField],
-                orders[amountField],
+                self.safe_float(orders, priceField),
+                self.safe_float(orders, amountField),
             ])
         return result
 
@@ -317,25 +321,40 @@ class fcoin (Exchange):
         return self.parse_trades(response['data'], market, since, limit)
 
     def create_order(self, symbol, type, side, amount, price=None, params={}):
+        if type == 'market':
+            # for market buy it requires the amount of quote currency to spend
+            if side == 'buy':
+                if self.options['createMarketBuyOrderRequiresPrice']:
+                    if price is None:
+                        raise InvalidOrder(self.id + " createOrder() requires the price argument with market buy orders to calculate total order cost(amount to spend), where cost = amount * price. Supply a price argument to createOrder() call if you want the cost to be calculated for you from price and amount, or, alternatively, add .options['createMarketBuyOrderRequiresPrice'] = False to supply the cost in the amount argument(the exchange-specific behaviour)")
+                    else:
+                        amount = amount * price
         self.load_markets()
         orderType = type
-        amount = self.amount_to_precision(symbol, amount)
-        order = {
+        request = {
             'symbol': self.market_id(symbol),
-            'amount': amount,
+            'amount': self.amount_to_precision(symbol, amount),
             'side': side,
             'type': orderType,
         }
         if type == 'limit':
-            order['price'] = self.price_to_precision(symbol, price)
-        result = self.privatePostOrders(self.extend(order, params))
-        return result['data']
+            request['price'] = self.price_to_precision(symbol, price)
+        result = self.privatePostOrders(self.extend(request, params))
+        return {
+            'info': result,
+            'id': result['data'],
+        }
 
     def cancel_order(self, id, symbol=None, params={}):
         self.load_markets()
-        return self.privatePostOrdersOrderIdSubmitCancel(self.extend({
+        response = self.privatePostOrdersOrderIdSubmitCancel(self.extend({
             'order_id': id,
         }, params))
+        order = self.parse_order(response)
+        return self.extend(order, {
+            'id': id,
+            'status': 'canceled',
+        })
 
     def parse_order_status(self, status):
         statuses = {
@@ -351,26 +370,29 @@ class fcoin (Exchange):
         return status
 
     def parse_order(self, order, market=None):
-        id = order['id']
-        side = order['side']
-        status = self.parse_order_status(order['state'])
+        id = self.safe_string(order, 'id')
+        side = self.safe_string(order, 'side')
+        status = self.parse_order_status(self.safe_string(order, 'state'))
         symbol = None
         if market is None:
-            marketId = order['symbol']
+            marketId = self.safe_string(order, 'symbol')
             if marketId in self.markets_by_id:
                 market = self.markets_by_id[marketId]
-        orderType = order['type']
-        timestamp = int(order['created_at'])
+        orderType = self.safe_string(order, 'type')
+        timestamp = self.safe_integer(order, 'created_at')
         amount = self.safe_float(order, 'amount')
         filled = self.safe_float(order, 'filled_amount')
         remaining = None
         price = self.safe_float(order, 'price')
-        cost = None
+        cost = self.safe_float(order, 'executed_value')
         if filled is not None:
             if amount is not None:
                 remaining = amount - filled
-            if price is not None:
-                cost = price * filled
+            if cost is None:
+                if price is not None:
+                    cost = price * filled
+            elif (cost > 0) and(filled > 0):
+                price = cost / filled
         feeCurrency = None
         if market is not None:
             symbol = market['symbol']
@@ -409,7 +431,7 @@ class fcoin (Exchange):
         return self.parse_order(response['data'])
 
     def fetch_open_orders(self, symbol=None, since=None, limit=None, params={}):
-        result = self.fetch_orders(symbol, since, limit, {'states': 'submitted'})
+        result = self.fetch_orders(symbol, since, limit, {'states': 'submitted,partial_filled'})
         return result
 
     def fetch_closed_orders(self, symbol=None, since=None, limit=None, params={}):
@@ -421,7 +443,7 @@ class fcoin (Exchange):
         market = self.market(symbol)
         request = {
             'symbol': market['id'],
-            'states': 'submitted',
+            'states': 'submitted,partial_filled,partial_canceled,filled,canceled',
         }
         if limit is not None:
             request['limit'] = limit
@@ -430,7 +452,7 @@ class fcoin (Exchange):
 
     def parse_ohlcv(self, ohlcv, market=None, timeframe='1m', since=None, limit=None):
         return [
-            ohlcv['seq'],
+            ohlcv['id'] * 1000,
             ohlcv['open'],
             ohlcv['high'],
             ohlcv['low'],
@@ -469,7 +491,7 @@ class fcoin (Exchange):
             query = self.keysort(query)
             if method == 'GET':
                 if query:
-                    url += '?' + self.urlencode(query)
+                    url += '?' + self.rawencode(query)
             # HTTP_METHOD + HTTP_REQUEST_URI + TIMESTAMP + POST_BODY
             auth = method + url + timestamp
             if method == 'POST':
@@ -487,13 +509,12 @@ class fcoin (Exchange):
             }
         return {'url': url, 'method': method, 'body': body, 'headers': headers}
 
-    def handle_errors(self, code, reason, url, method, headers, body):
+    def handle_errors(self, code, reason, url, method, headers, body, response):
         if not isinstance(body, basestring):
             return  # fallback to default error handler
         if len(body) < 2:
             return  # fallback to default error handler
         if (body[0] == '{') or (body[0] == '['):
-            response = json.loads(body)
             status = self.safe_string(response, 'status')
             if status != '0':
                 feedback = self.id + ' ' + body

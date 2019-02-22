@@ -5,7 +5,9 @@ from setuptools import setup, find_packages
 from codecs import open
 from os import path
 import json
+import sys
 
+is_python_2 = sys.version_info < (3, 0)
 
 here = path.abspath(path.dirname(__file__))
 root = path.dirname(here)
@@ -62,7 +64,7 @@ setup(
     ],
 
     keywords=package['keywords'],
-    packages=find_packages(),
+    packages=find_packages(exclude=['ccxt.async_support*'] if is_python_2 else []),
 
     install_requires=[
         'setuptools>=38.5.1',
@@ -71,11 +73,10 @@ setup(
     ],
 
     extras_require={
-        ':python_version>="3.5.3"': [
+        ':python_version>="3.5.2"': [
             'aiohttp>=3.0.1',
-            'cchardet==2.1.1',
             'aiodns==1.1.1',
-            'yarl==1.1.0'
+            'yarl==1.1.0',
         ],
         'qa': [
             'flake8==3.5.0'

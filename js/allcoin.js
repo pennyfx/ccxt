@@ -24,7 +24,7 @@ module.exports = class allcoin extends okcoinusd {
                     'private': 'https://api.allcoin.com/api',
                 },
                 'www': 'https://www.allcoin.com',
-                'doc': 'https://www.allcoin.com/About/APIReference',
+                'doc': 'https://www.allcoin.com/api_market/market',
             },
             'api': {
                 'web': {
@@ -57,7 +57,7 @@ module.exports = class allcoin extends okcoinusd {
         });
     }
 
-    async fetchMarkets () {
+    async fetchMarkets (params = {}) {
         let result = [];
         let response = await this.webGetHomeMarketOverViewDetail ();
         let coins = response['marketCoins'];
@@ -111,17 +111,14 @@ module.exports = class allcoin extends okcoinusd {
     }
 
     parseOrderStatus (status) {
-        if (status === -1)
-            return 'canceled';
-        if (status === 0)
-            return 'open';
-        if (status === 1)
-            return 'open'; // partially filled
-        if (status === 2)
-            return 'closed';
-        if (status === 10)
-            return 'canceled';
-        return status;
+        let statuses = {
+            '-1': 'canceled',
+            '0': 'open',
+            '1': 'open',
+            '2': 'closed',
+            '10': 'canceled',
+        };
+        return this.safeString (statuses, status, status);
     }
 
     getCreateDateField () {

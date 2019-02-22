@@ -21,7 +21,7 @@ class coinfloor extends Exchange {
             ),
             'urls' => array (
                 'logo' => 'https://user-images.githubusercontent.com/1294454/28246081-623fc164-6a1c-11e7-913f-bac0d5576c90.jpg',
-                'api' => 'https://webapi.coinfloor.co.uk:8090/bist',
+                'api' => 'https://webapi.coinfloor.co.uk/bist',
                 'www' => 'https://www.coinfloor.co.uk',
                 'doc' => array (
                     'https://github.com/coinfloor/api',
@@ -58,11 +58,12 @@ class coinfloor extends Exchange {
                 ),
             ),
             'markets' => array (
-                'BTC/GBP' => array ( 'id' => 'XBT/GBP', 'symbol' => 'BTC/GBP', 'base' => 'BTC', 'quote' => 'GBP' ),
-                'BTC/EUR' => array ( 'id' => 'XBT/EUR', 'symbol' => 'BTC/EUR', 'base' => 'BTC', 'quote' => 'EUR' ),
-                'BTC/USD' => array ( 'id' => 'XBT/USD', 'symbol' => 'BTC/USD', 'base' => 'BTC', 'quote' => 'USD' ),
-                'BTC/PLN' => array ( 'id' => 'XBT/PLN', 'symbol' => 'BTC/PLN', 'base' => 'BTC', 'quote' => 'PLN' ),
-                'BCH/GBP' => array ( 'id' => 'BCH/GBP', 'symbol' => 'BCH/GBP', 'base' => 'BCH', 'quote' => 'GBP' ),
+                'BTC/GBP' => array ( 'id' => 'XBT/GBP', 'symbol' => 'BTC/GBP', 'base' => 'BTC', 'quote' => 'GBP', 'baseId' => 'XBT', 'quoteId' => 'GBP' ),
+                'BTC/EUR' => array ( 'id' => 'XBT/EUR', 'symbol' => 'BTC/EUR', 'base' => 'BTC', 'quote' => 'EUR', 'baseId' => 'XBT', 'quoteId' => 'EUR' ),
+                'BTC/USD' => array ( 'id' => 'XBT/USD', 'symbol' => 'BTC/USD', 'base' => 'BTC', 'quote' => 'USD', 'baseId' => 'XBT', 'quoteId' => 'USD' ),
+                'BTC/PLN' => array ( 'id' => 'XBT/PLN', 'symbol' => 'BTC/PLN', 'base' => 'BTC', 'quote' => 'PLN', 'baseId' => 'XBT', 'quoteId' => 'PLN' ),
+                'BCH/GBP' => array ( 'id' => 'BCH/GBP', 'symbol' => 'BCH/GBP', 'base' => 'BCH', 'quote' => 'GBP', 'baseId' => 'BCH', 'quoteId' => 'GBP' ),
+                'ETH/GBP' => array ( 'id' => 'ETH/GBP', 'symbol' => 'ETH/GBP', 'base' => 'ETH', 'quote' => 'GBP', 'baseId' => 'ETH', 'quoteId' => 'GBP' ),
             ),
         ));
     }
@@ -190,8 +191,7 @@ class coinfloor extends Exchange {
     }
 
     public function parse_order ($order, $market = null) {
-        $timestamp = $this->parse_date($order['datetime']);
-        $datetime = $this->iso8601 ($timestamp);
+        $timestamp = $this->parse8601 ($order['datetime']);
         $price = $this->safe_float($order, 'price');
         $amount = $this->safe_float($order, 'amount');
         $cost = $price * $amount;
@@ -208,7 +208,7 @@ class coinfloor extends Exchange {
         return array (
             'info' => $order,
             'id' => $id,
-            'datetime' => $datetime,
+            'datetime' => $this->iso8601 ($timestamp),
             'timestamp' => $timestamp,
             'lastTradeTimestamp' => null,
             'status' => $status,

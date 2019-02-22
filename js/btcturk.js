@@ -58,7 +58,7 @@ module.exports = class btcturk extends Exchange {
         });
     }
 
-    async fetchMarkets () {
+    async fetchMarkets (params = {}) {
         let response = await this.publicGetTicker ();
         let result = [];
         for (let i = 0; i < response.length; i++) {
@@ -231,7 +231,7 @@ module.exports = class btcturk extends Exchange {
         await this.loadMarkets ();
         let market = this.market (symbol);
         let request = {};
-        if (typeof limit !== 'undefined')
+        if (limit !== undefined)
             request['last'] = limit;
         let response = await this.publicGetOhlcdata (this.extend (request, params));
         return this.parseOHLCVs (response, market, timeframe, since, limit);

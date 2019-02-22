@@ -6,8 +6,8 @@
 from ccxt.base.exchange import Exchange
 import base64
 import hashlib
-import json
 from ccxt.base.errors import ExchangeError
+from ccxt.base.errors import ArgumentsRequired
 from ccxt.base.errors import InvalidOrder
 from ccxt.base.errors import OrderNotFound
 from ccxt.base.errors import ExchangeNotAvailable
@@ -80,6 +80,10 @@ class coinone (Exchange):
                 'QTUM/KRW': {'id': 'qtum', 'symbol': 'QTUM/KRW', 'base': 'QTUM', 'quote': 'KRW', 'baseId': 'qtum', 'quoteId': 'krw'},
                 'XRP/KRW': {'id': 'xrp', 'symbol': 'XRP/KRW', 'base': 'XRP', 'quote': 'KRW', 'baseId': 'xrp', 'quoteId': 'krw'},
                 'EOS/KRW': {'id': 'eos', 'symbol': 'EOS/KRW', 'base': 'EOS', 'quote': 'KRW', 'baseId': 'eos', 'quoteId': 'krw'},
+                'DATA/KRW': {'id': 'data', 'symbol': 'DATA/KRW', 'base': 'DATA', 'quote': 'KRW', 'baseId': 'data', 'quoteId': 'krw'},
+                'ZIL/KRW': {'id': 'zil', 'symbol': 'ZIL/KRW', 'base': 'ZIL', 'quote': 'KRW', 'baseId': 'zil', 'quoteId': 'krw'},
+                'KNC/KRW': {'id': 'knc', 'symbol': 'KNC/KRW', 'base': 'KNC', 'quote': 'KRW', 'baseId': 'knc', 'quoteId': 'krw'},
+                'ZRX/KRW': {'id': 'zrx', 'symbol': 'ZRX/KRW', 'base': 'ZRX', 'quote': 'KRW', 'baseId': 'zrx', 'quoteId': 'krw'},
             },
             'fees': {
                 'trading': {
@@ -215,6 +219,12 @@ class coinone (Exchange):
     def parse_trade(self, trade, market=None):
         timestamp = int(trade['timestamp']) * 1000
         symbol = market['symbol'] if (market is not None) else None
+        is_ask = self.safe_string(trade, 'is_ask')
+        side = None
+        if is_ask == '1':
+            side = 'sell'
+        elif is_ask == '0':
+            side = 'buy'
         return {
             'id': None,
             'timestamp': timestamp,
@@ -222,7 +232,7 @@ class coinone (Exchange):
             'order': None,
             'symbol': symbol,
             'type': None,
-            'side': None,
+            'side': side,
             'price': self.safe_float(trade, 'price'),
             'amount': self.safe_float(trade, 'qty'),
             'fee': None,
@@ -250,6 +260,8 @@ class coinone (Exchange):
         method = 'privatePostOrder' + self.capitalize(type) + self.capitalize(side)
         response = getattr(self, method)(self.extend(request, params))
         id = self.safe_string(response, 'orderId')
+        if id is not None:
+            id = id.upper()
         timestamp = self.milliseconds()
         cost = price * amount
         order = {
@@ -281,7 +293,7 @@ class coinone (Exchange):
             if id in self.orders:
                 market = self.market(self.orders[id]['symbol'])
             else:
-                raise ExchangeError(self.id + ' fetchOrder() requires a symbol argument for order ids missing in the .orders cache(the order was created with a different instance of self class or within a different run of self code).')
+                raise ArgumentsRequired(self.id + ' fetchOrder() requires a symbol argument for order ids missing in the .orders cache(the order was created with a different instance of self class or within a different run of self code).')
         else:
             market = self.market(symbol)
         try:
@@ -315,9 +327,10 @@ class coinone (Exchange):
     def parse_order(self, order, market=None):
         info = self.safe_value(order, 'info')
         id = self.safe_string(info, 'orderId')
+        if id is not None:
+            id = id.upper()
         timestamp = int(info['timestamp']) * 1000
-        status = self.safe_string(order, 'status')
-        status = self.parse_order_status(status)
+        status = self.parse_order_status(self.safe_string(order, 'status'))
         cost = None
         side = self.safe_string(info, 'type')
         if side.find('ask') >= 0:
@@ -398,6 +411,7 @@ class coinone (Exchange):
             'is_ask': side,
             'currency': self.market_id(symbol),
         }
+        self.orders[id]['status'] = 'canceled'
         return self.privatePostOrderCancel(self.extend(request, params))
 
     def sign(self, path, api='public', method='GET', params={}, headers=None, body=None):
@@ -427,9 +441,8 @@ class coinone (Exchange):
             }
         return {'url': url, 'method': method, 'body': body, 'headers': headers}
 
-    def handle_errors(self, code, reason, url, method, headers, body):
+    def handle_errors(self, code, reason, url, method, headers, body, response):
         if (body[0] == '{') or (body[0] == '['):
-            response = json.loads(body)
             if 'result' in response:
                 result = response['result']
                 if result != 'success':

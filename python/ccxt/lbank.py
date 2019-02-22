@@ -66,6 +66,10 @@ class lbank (Exchange):
                         'cancel_order',
                         'orders_info',
                         'orders_info_history',
+                        'withdraw',
+                        'withdrawCancel',
+                        'withdraws',
+                        'withdrawConfigs',
                     ],
                 },
             },
@@ -106,7 +110,7 @@ class lbank (Exchange):
             },
         })
 
-    def fetch_markets(self):
+    def fetch_markets(self, params={}):
         markets = self.publicGetAccuracy()
         result = []
         for i in range(0, len(markets)):
@@ -127,8 +131,8 @@ class lbank (Exchange):
             quote = self.common_currency_code(quoteId.upper())
             symbol = base + '/' + quote
             precision = {
-                'amount': market['quantityAccuracy'],
-                'price': market['priceAccuracy'],
+                'amount': self.safe_integer(market, 'quantityAccuracy'),
+                'price': self.safe_integer(market, 'priceAccuracy'),
             }
             result.append({
                 'id': id,
@@ -235,9 +239,12 @@ class lbank (Exchange):
 
     def fetch_order_book(self, symbol, limit=60, params={}):
         self.load_markets()
+        size = 60
+        if limit is not None:
+            size = min(limit, size)
         response = self.publicGetDepth(self.extend({
             'symbol': self.market_id(symbol),
-            'size': min(limit, 60),
+            'size': size,
         }, params))
         return self.parse_order_book(response)
 
@@ -270,7 +277,7 @@ class lbank (Exchange):
             'size': 100,
         }
         if since is not None:
-            request['time'] = int(since / 1000)
+            request['time'] = int(since)
         if limit is not None:
             request['size'] = limit
         response = self.publicGetTrades(self.extend(request, params))
@@ -435,6 +442,24 @@ class lbank (Exchange):
         cancelled = self.filter_by(orders, 'status', 'cancelled')  # cancelled orders may be partially filled
         return closed + cancelled
 
+    def withdraw(self, code, amount, address, tag=None, params={}):
+        # mark and fee are optional params, mark is a note and must be less than 255 characters
+        self.check_address(address)
+        self.load_markets()
+        currency = self.currency(code)
+        request = {
+            'assetCode': currency['id'],
+            'amount': amount,
+            'account': address,
+        }
+        if tag is not None:
+            request['memo'] = tag
+        response = self.privatePostWithdraw(self.extend(request, params))
+        return {
+            'id': response['id'],
+            'info': response,
+        }
+
     def sign(self, path, api='public', method='GET', params={}, headers=None, body=None):
         query = self.omit(params, self.extract_params(path))
         url = self.urls['api'] + '/' + self.version + '/' + self.implode_params(path, params)
@@ -481,6 +506,7 @@ class lbank (Exchange):
                 '10018': 'order inquiry can not be more than 50 less than one',
                 '10019': 'withdrawal orders can not be more than 3 less than one',
                 '10020': 'less than the minimum amount of the transaction limit of 0.001',
+                '10022': 'Insufficient key authority',
             }, errorCode, self.json(response))
             ErrorClass = self.safe_value({
                 '10002': AuthenticationError,
@@ -496,6 +522,7 @@ class lbank (Exchange):
                 '10014': InvalidOrder,
                 '10015': InvalidOrder,
                 '10016': InvalidOrder,
+                '10022': AuthenticationError,
             }, errorCode, ExchangeError)
             raise ErrorClass(message)
         return response

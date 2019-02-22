@@ -28,6 +28,7 @@ class braziliex extends Exchange {
                 'www' => 'https://braziliex.com/',
                 'doc' => 'https://braziliex.com/exchange/api.php',
                 'fees' => 'https://braziliex.com/exchange/fees.php',
+                'referral' => 'https://braziliex.com/?ref=5FE61AB6F6D67DA885BC98BA27223465',
             ),
             'api' => array (
                 'public' => array (
@@ -54,6 +55,7 @@ class braziliex extends Exchange {
             ),
             'commonCurrencies' => array (
                 'EPC' => 'Epacoin',
+                'ABC' => 'Anti Bureaucracy Coin',
             ),
             'fees' => array (
                 'trading' => array (
@@ -96,16 +98,16 @@ class braziliex extends Exchange {
                 'funding' => array (
                     'withdraw' => array (
                         'active' => $canWithdraw,
-                        'fee' => $currency['txWithdrawalFee'],
+                        'fee' => $this->safe_float($currency, 'txWithdrawalFee'),
                     ),
                     'deposit' => array (
                         'active' => $canDeposit,
-                        'fee' => $currency['txDepositFee'],
+                        'fee' => $this->safe_float($currency, 'txDepositFee'),
                     ),
                 ),
                 'limits' => array (
                     'amount' => array (
-                        'min' => $currency['minAmountTrade'],
+                        'min' => $this->safe_float($currency, 'minAmountTrade'),
                         'max' => pow (10, $precision),
                     ),
                     'price' => array (
@@ -117,11 +119,11 @@ class braziliex extends Exchange {
                         'max' => null,
                     ),
                     'withdraw' => array (
-                        'min' => $currency['MinWithdrawal'],
+                        'min' => $this->safe_float($currency, 'MinWithdrawal'),
                         'max' => pow (10, $precision),
                     ),
                     'deposit' => array (
-                        'min' => $currency['minDeposit'],
+                        'min' => $this->safe_float($currency, 'minDeposit'),
                         'max' => null,
                     ),
                 ),
@@ -131,7 +133,7 @@ class braziliex extends Exchange {
         return $result;
     }
 
-    public function fetch_markets () {
+    public function fetch_markets ($params = array ()) {
         $markets = $this->publicGetTicker ();
         $ids = is_array ($markets) ? array_keys ($markets) : array ();
         $result = array ();
@@ -149,7 +151,6 @@ class braziliex extends Exchange {
                 'amount' => 8,
                 'price' => 8,
             );
-            $lot = pow (10, -$precision['amount']);
             $result[] = array (
                 'id' => $id,
                 'symbol' => strtoupper ($symbol),
@@ -158,11 +159,10 @@ class braziliex extends Exchange {
                 'baseId' => $baseId,
                 'quoteId' => $quoteId,
                 'active' => $active,
-                'lot' => $lot,
                 'precision' => $precision,
                 'limits' => array (
                     'amount' => array (
-                        'min' => $lot,
+                        'min' => pow (10, -$precision['amount']),
                         'max' => pow (10, $precision['amount']),
                     ),
                     'price' => array (
@@ -324,7 +324,7 @@ class braziliex extends Exchange {
         $amount = $this->safe_float($order, 'amount');
         $filledPercentage = $this->safe_float($order, 'progress');
         $filled = $amount * $filledPercentage;
-        $remaining = $this->amount_to_precision($symbol, $amount - $filled);
+        $remaining = floatval ($this->amount_to_precision($symbol, $amount - $filled));
         $info = $order;
         if (is_array ($info) && array_key_exists ('info', $info))
             $info = $order['info'];

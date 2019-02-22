@@ -59,7 +59,7 @@ class lakebtc extends Exchange {
         ));
     }
 
-    public function fetch_markets () {
+    public function fetch_markets ($params = array ()) {
         $markets = $this->publicGetTicker ();
         $result = array ();
         $keys = is_array ($markets) ? array_keys ($markets) : array ();
@@ -214,7 +214,9 @@ class lakebtc extends Exchange {
 
     public function cancel_order ($id, $symbol = null, $params = array ()) {
         $this->load_markets();
-        return $this->privatePostCancelOrder (array ( 'params' => $id ));
+        return $this->privatePostCancelOrder (array (
+            'params' => array ( $id ),
+        ));
     }
 
     public function nonce () {
@@ -232,7 +234,8 @@ class lakebtc extends Exchange {
             $nonce = $this->nonce ();
             $queryParams = '';
             if (is_array ($params) && array_key_exists ('params', $params)) {
-                $queryParams = $params['params'].join ();
+                $paramsList = $params['params'];
+                $queryParams = implode (',', $paramsList);
             }
             $query = $this->urlencode (array (
                 'tonce' => $nonce,

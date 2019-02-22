@@ -62,6 +62,10 @@ class lbank extends Exchange {
                         'cancel_order',
                         'orders_info',
                         'orders_info_history',
+                        'withdraw',
+                        'withdrawCancel',
+                        'withdraws',
+                        'withdrawConfigs',
                     ),
                 ),
             ),
@@ -103,7 +107,7 @@ class lbank extends Exchange {
         ));
     }
 
-    public function fetch_markets () {
+    public function fetch_markets ($params = array ()) {
         $markets = $this->publicGetAccuracy ();
         $result = array ();
         for ($i = 0; $i < count ($markets); $i++) {
@@ -125,8 +129,8 @@ class lbank extends Exchange {
             $quote = $this->common_currency_code(strtoupper ($quoteId));
             $symbol = $base . '/' . $quote;
             $precision = array (
-                'amount' => $market['quantityAccuracy'],
-                'price' => $market['priceAccuracy'],
+                'amount' => $this->safe_integer($market, 'quantityAccuracy'),
+                'price' => $this->safe_integer($market, 'priceAccuracy'),
             );
             $result[] = array (
                 'id' => $id,
@@ -242,9 +246,12 @@ class lbank extends Exchange {
 
     public function fetch_order_book ($symbol, $limit = 60, $params = array ()) {
         $this->load_markets();
+        $size = 60;
+        if ($limit !== null)
+            $size = min ($limit, $size);
         $response = $this->publicGetDepth (array_merge (array (
             'symbol' => $this->market_id($symbol),
-            'size' => min ($limit, 60),
+            'size' => $size,
         ), $params));
         return $this->parse_order_book($response);
     }
@@ -279,7 +286,7 @@ class lbank extends Exchange {
             'size' => 100,
         );
         if ($since !== null)
-            $request['time'] = intval ($since / 1000);
+            $request['time'] = intval ($since);
         if ($limit !== null)
             $request['size'] = $limit;
         $response = $this->publicGetTrades (array_merge ($request, $params));
@@ -461,6 +468,26 @@ class lbank extends Exchange {
         return $closed . $cancelled;
     }
 
+    public function withdraw ($code, $amount, $address, $tag = null, $params = array ()) {
+        // mark and fee are optional $params, mark is a note and must be less than 255 characters
+        $this->check_address($address);
+        $this->load_markets();
+        $currency = $this->currency ($code);
+        $request = array (
+            'assetCode' => $currency['id'],
+            'amount' => $amount,
+            'account' => $address,
+        );
+        if ($tag !== null) {
+            $request['memo'] = $tag;
+        }
+        $response = $this->privatePostWithdraw (array_merge ($request, $params));
+        return array (
+            'id' => $response['id'],
+            'info' => $response,
+        );
+    }
+
     public function sign ($path, $api = 'public', $method = 'GET', $params = array (), $headers = null, $body = null) {
         $query = $this->omit ($params, $this->extract_params($path));
         $url = $this->urls['api'] . '/' . $this->version . '/' . $this->implode_params($path, $params);
@@ -509,6 +536,7 @@ class lbank extends Exchange {
                 '10018' => 'order inquiry can not be more than 50 less than one',
                 '10019' => 'withdrawal orders can not be more than 3 less than one',
                 '10020' => 'less than the minimum amount of the transaction limit of 0.001',
+                '10022' => 'Insufficient key authority',
             ), $errorCode, $this->json ($response));
             $ErrorClass = $this->safe_value(array (
                 '10002' => '\\ccxt\\AuthenticationError',
@@ -524,6 +552,7 @@ class lbank extends Exchange {
                 '10014' => '\\ccxt\\InvalidOrder',
                 '10015' => '\\ccxt\\InvalidOrder',
                 '10016' => '\\ccxt\\InvalidOrder',
+                '10022' => '\\ccxt\\AuthenticationError',
             ), $errorCode, '\\ccxt\\ExchangeError');
             throw new $ErrorClass ($message);
         }

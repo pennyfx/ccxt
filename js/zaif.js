@@ -3,7 +3,7 @@
 //  ---------------------------------------------------------------------------
 
 const Exchange = require ('./base/Exchange');
-const { ExchangeError } = require ('./base/errors');
+const { ExchangeError, BadRequest } = require ('./base/errors');
 
 //  ---------------------------------------------------------------------------
 
@@ -27,7 +27,7 @@ module.exports = class zaif extends Exchange {
                 'api': 'https://api.zaif.jp',
                 'www': 'https://zaif.jp',
                 'doc': [
-                    'http://techbureau-api-document.readthedocs.io/ja/latest/index.html',
+                    'https://techbureau-api-document.readthedocs.io/ja/latest/index.html',
                     'https://corp.zaif.jp/api-docs',
                     'https://corp.zaif.jp/api-docs/api_links',
                     'https://www.npmjs.com/package/zaif.jp',
@@ -38,8 +38,8 @@ module.exports = class zaif extends Exchange {
             'fees': {
                 'trading': {
                     'percentage': true,
-                    'taker': -0.0001,
-                    'maker': -0.0005,
+                    'taker': 0.1 / 100,
+                    'maker': 0,
                 },
             },
             'api': {
@@ -98,10 +98,27 @@ module.exports = class zaif extends Exchange {
                     ],
                 },
             },
+            'options': {
+                // zaif schedule defines several market-specific fees
+                'fees': {
+                    'BTC/JPY': { 'maker': 0, 'taker': 0 },
+                    'BCH/JPY': { 'maker': 0, 'taker': 0.3 / 100 },
+                    'BCH/BTC': { 'maker': 0, 'taker': 0.3 / 100 },
+                    'PEPECASH/JPY': { 'maker': 0, 'taker': 0.01 / 100 },
+                    'PEPECASH/BT': { 'maker': 0, 'taker': 0.01 / 100 },
+                },
+            },
+            'exceptions': {
+                'exact': {
+                    'unsupported currency_pair': BadRequest, // {"error": "unsupported currency_pair"}
+                },
+                'broad': {
+                },
+            },
         });
     }
 
-    async fetchMarkets () {
+    async fetchMarkets (params = {}) {
         let markets = await this.publicGetCurrencyPairsAll ();
         let result = [];
         for (let p = 0; p < markets.length; p++) {
@@ -113,6 +130,9 @@ module.exports = class zaif extends Exchange {
                 'amount': -Math.log10 (market['item_unit_step']),
                 'price': market['aux_unit_point'],
             };
+            const fees = this.safeValue (this.options['fees'], symbol, this.fees['trading']);
+            const taker = fees['taker'];
+            const maker = fees['maker'];
             result.push ({
                 'id': id,
                 'symbol': symbol,
@@ -120,6 +140,8 @@ module.exports = class zaif extends Exchange {
                 'quote': quote,
                 'active': true, // can trade or not
                 'precision': precision,
+                'taker': taker,
+                'maker': maker,
                 'limits': {
                     'amount': {
                         'min': this.safeFloat (market, 'item_unit_min'),
@@ -182,7 +204,9 @@ module.exports = class zaif extends Exchange {
         let timestamp = this.milliseconds ();
         let vwap = ticker['vwap'];
         let baseVolume = ticker['volume'];
-        let quoteVolume = baseVolume * vwap;
+        let quoteVolume = undefined;
+        if (baseVolume !== undefined && vwap !== undefined)
+            quoteVolume = baseVolume * vwap;
         let last = ticker['last'];
         return {
             'symbol': symbol,
@@ -213,6 +237,8 @@ module.exports = class zaif extends Exchange {
         let timestamp = trade['date'] * 1000;
         let id = this.safeString (trade, 'id');
         id = this.safeString (trade, 'tid', id);
+        let price = this.safeFloat (trade, 'price');
+        let amount = this.safeFloat (trade, 'amount');
         if (!market)
             market = this.markets_by_id[trade['currency_pair']];
         return {
@@ -223,8 +249,8 @@ module.exports = class zaif extends Exchange {
             'symbol': market['symbol'],
             'type': undefined,
             'side': side,
-            'price': trade['price'],
-            'amount': trade['amount'],
+            'price': price,
+            'amount': amount,
         };
     }
 
@@ -311,7 +337,7 @@ module.exports = class zaif extends Exchange {
             // 'is_token': false,
             // 'is_token_both': false,
         };
-        if (typeof symbol !== 'undefined') {
+        if (symbol !== undefined) {
             market = this.market (symbol);
             request['currency_pair'] = market['id'];
         }
@@ -332,7 +358,7 @@ module.exports = class zaif extends Exchange {
             // 'end': 1503821051,
             // 'is_token': false,
         };
-        if (typeof symbol !== 'undefined') {
+        if (symbol !== undefined) {
             market = this.market (symbol);
             request['currency_pair'] = market['id'];
         }
@@ -340,18 +366,24 @@ module.exports = class zaif extends Exchange {
         return this.parseOrders (response['return'], market, since, limit);
     }
 
-    async withdraw (currency, amount, address, tag = undefined, params = {}) {
+    async withdraw (code, amount, address, tag = undefined, params = {}) {
         this.checkAddress (address);
         await this.loadMarkets ();
-        if (currency === 'JPY')
-            throw new ExchangeError (this.id + ' does not allow ' + currency + ' withdrawals');
-        let result = await this.privatePostWithdraw (this.extend ({
-            'currency': currency,
+        let currency = this.currency (code);
+        if (code === 'JPY') {
+            throw new ExchangeError (this.id + ' withdraw() does not allow ' + code + ' withdrawals');
+        }
+        let request = {
+            'currency': currency['id'],
             'amount': amount,
             'address': address,
-            // 'message': 'Hi!', // XEM only
+            // 'message': 'Hi!', // XEM and others
             // 'opt_fee': 0.003, // BTC and MONA only
-        }, params));
+        };
+        if (tag !== undefined) {
+            request['message'] = tag;
+        }
+        let result = await this.privatePostWithdraw (this.extend (request, params));
         return {
             'info': result,
             'id': result['return']['txid'],
@@ -393,13 +425,30 @@ module.exports = class zaif extends Exchange {
         return { 'url': url, 'method': method, 'body': body, 'headers': headers };
     }
 
-    async request (path, api = 'api', method = 'GET', params = {}, headers = undefined, body = undefined) {
-        let response = await this.fetch2 (path, api, method, params, headers, body);
-        if ('error' in response)
-            throw new ExchangeError (this.id + ' ' + response['error']);
-        if ('success' in response)
-            if (!response['success'])
-                throw new ExchangeError (this.id + ' ' + this.json (response));
-        return response;
+    handleErrors (httpCode, reason, url, method, headers, body, response) {
+        if (response === undefined) {
+            return;
+        }
+        //
+        //     {"error": "unsupported currency_pair"}
+        //
+        const feedback = this.id + ' ' + body;
+        const error = this.safeString (response, 'error');
+        if (error !== undefined) {
+            const exact = this.exceptions['exact'];
+            if (error in exact) {
+                throw new exact[error] (feedback);
+            }
+            const broad = this.exceptions['broad'];
+            const broadKey = this.findBroadlyMatchedKey (broad, error);
+            if (broadKey !== undefined) {
+                throw new broad[broadKey] (feedback);
+            }
+            throw new ExchangeError (feedback); // unknown message
+        }
+        const success = this.safeValue (response, 'success', true);
+        if (!success) {
+            throw new ExchangeError (feedback);
+        }
     }
 };

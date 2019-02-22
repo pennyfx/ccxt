@@ -18,6 +18,7 @@ class ice3x (Exchange):
             'name': 'ICE3X',
             'countries': ['ZA'],  # South Africa
             'rateLimit': 1000,
+            'version': 'v1',
             'has': {
                 'fetchCurrencies': True,
                 'fetchTickers': True,
@@ -28,7 +29,7 @@ class ice3x (Exchange):
             },
             'urls': {
                 'logo': 'https://user-images.githubusercontent.com/1294454/38012176-11616c32-3269-11e8-9f05-e65cf885bb15.jpg',
-                'api': 'https://ice3x.com/api/v1',
+                'api': 'https://ice3x.com/api',
                 'www': [
                     'https://ice3x.com',
                     'https://ice3x.co.za',
@@ -40,6 +41,7 @@ class ice3x (Exchange):
                     'https://help.ice3.com/support/solutions/articles/11000008131-what-are-your-fiat-deposit-and-withdrawal-fees-',
                     'https://help.ice3.com/support/solutions/articles/11000033289-deposit-fees',
                 ],
+                'referral': 'https://ice3x.com?ref=14341802',
             },
             'api': {
                 'public': {
@@ -93,8 +95,10 @@ class ice3x (Exchange):
         result = {}
         for i in range(0, len(currencies)):
             currency = currencies[i]
-            id = currency['currency_id']
-            code = self.common_currency_code(currency['iso'].upper())
+            id = self.safe_string(currency, 'currency_id')
+            code = self.safe_string(currency, 'iso')
+            code = code.upper()
+            code = self.common_currency_code(code)
             result[code] = {
                 'id': id,
                 'code': code,
@@ -119,7 +123,7 @@ class ice3x (Exchange):
             }
         return result
 
-    def fetch_markets(self):
+    def fetch_markets(self, params={}):
         if not self.currencies:
             self.currencies = self.fetch_currencies()
         self.currencies_by_id = self.index_by(self.currencies, 'id')
@@ -128,9 +132,9 @@ class ice3x (Exchange):
         result = []
         for i in range(0, len(markets)):
             market = markets[i]
-            id = market['pair_id']
-            baseId = str(market['currency_id_from'])
-            quoteId = str(market['currency_id_to'])
+            id = self.safe_string(market, 'pair_id')
+            baseId = self.safe_string(market, 'currency_id_from')
+            quoteId = self.safe_string(market, 'currency_id_to')
             baseCurrency = self.currencies_by_id[baseId]
             quoteCurrency = self.currencies_by_id[quoteId]
             base = self.common_currency_code(baseCurrency['code'])
@@ -144,7 +148,6 @@ class ice3x (Exchange):
                 'baseId': baseId,
                 'quoteId': quoteId,
                 'active': True,
-                'lot': None,
                 'info': market,
             })
         return result
@@ -191,16 +194,26 @@ class ice3x (Exchange):
         result = {}
         for i in range(0, len(tickers)):
             ticker = tickers[i]
-            market = self.marketsById[ticker['pair_id']]
-            symbol = market['symbol']
-            result[symbol] = self.parse_ticker(ticker, market)
+            marketId = self.safe_string(ticker, 'pair_id')
+            market = self.safe_value(self.marketsById, marketId)
+            if market is not None:
+                symbol = market['symbol']
+                result[symbol] = self.parse_ticker(ticker, market)
         return result
 
-    def fetch_order_book(self, symbol, params={}):
+    def fetch_order_book(self, symbol, limit=None, params={}):
         self.load_markets()
-        response = self.publicGetOrderbookInfo(self.extend({
+        request = {
             'pair_id': self.market_id(symbol),
-        }, params))
+        }
+        if limit is not None:
+            type = self.safe_string(params, 'type')
+            if (type != 'ask') and(type != 'bid'):
+                # eslint-disable-next-line quotes
+                raise ExchangeError(self.id + " fetchOrderBook requires an exchange-specific extra 'type' param('bid' or 'ask') when used with a limit")
+            else:
+                request['items_per_page'] = limit
+        response = self.publicGetOrderbookInfo(self.extend(request, params))
         orderbook = response['response']['entities']
         return self.parse_order_book(orderbook, None, 'bids', 'asks', 'price', 'amount')
 
@@ -374,7 +387,7 @@ class ice3x (Exchange):
         }
 
     def sign(self, path, api='public', method='GET', params={}, headers=None, body=None):
-        url = self.urls['api'] + '/' + path
+        url = self.urls['api'] + '/' + self.version + '/' + path
         if api == 'public':
             if params:
                 url += '?' + self.urlencode(params)

@@ -29,12 +29,12 @@ class deribit extends Exchange {
             ),
             'timeframes' => array (),
             'urls' => array (
-                // 'test' => 'https://test.deribit.com',
+                'test' => 'https://test.deribit.com',
                 'logo' => 'https://user-images.githubusercontent.com/1294454/41933112-9e2dd65a-798b-11e8-8440-5bab2959fcb8.jpg',
                 'api' => 'https://www.deribit.com',
                 'www' => 'https://www.deribit.com',
                 'doc' => array (
-                    'https://www.deribit.com/pages/docs/api',
+                    'https://docs.deribit.com/',
                     'https://github.com/deribit',
                 ),
                 'fees' => 'https://www.deribit.com/pages/information/fees',
@@ -74,8 +74,59 @@ class deribit extends Exchange {
                 ),
             ),
             'exceptions' => array (
-                'Invalid API Key.' => '\\ccxt\\AuthenticationError',
-                'Access Denied' => '\\ccxt\\PermissionDenied',
+                // 0 or absent Success, No error
+                '9999' => '\\ccxt\\PermissionDenied',   // "api_not_enabled" User didn't enable API for the Account
+                '10000' => '\\ccxt\\AuthenticationError',  // "authorization_required" Authorization issue, invalid or absent signature etc
+                '10001' => '\\ccxt\\ExchangeError',     // "error" Some general failure, no public information available
+                '10002' => '\\ccxt\\InvalidOrder',      // "qty_too_low" Order quantity is too low
+                '10003' => '\\ccxt\\InvalidOrder',      // "order_overlap" Rejection, order overlap is found and self-trading is not enabled
+                '10004' => '\\ccxt\\OrderNotFound',     // "order_not_found" Attempt to operate with order that can't be found by specified id
+                '10005' => '\\ccxt\\InvalidOrder',      // "price_too_low {Limit}" Price is too low, {Limit} defines current limit for the operation
+                '10006' => '\\ccxt\\InvalidOrder',      // "price_too_low4idx {Limit}" Price is too low for current index, {Limit} defines current bottom limit for the operation
+                '10007' => '\\ccxt\\InvalidOrder', // "price_too_high {Limit}" Price is too high, {Limit} defines current up limit for the operation
+                '10008' => '\\ccxt\\InvalidOrder', // "price_too_high4idx {Limit}" Price is too high for current index, {Limit} defines current up limit for the operation
+                '10009' => '\\ccxt\\InsufficientFunds', // "not_enough_funds" Account has not enough funds for the operation
+                '10010' => '\\ccxt\\OrderNotFound', // "already_closed" Attempt of doing something with closed order
+                '10011' => '\\ccxt\\InvalidOrder', // "price_not_allowed" This price is not allowed for some reason
+                '10012' => '\\ccxt\\InvalidOrder', // "book_closed" Operation for instrument which order book had been closed
+                '10013' => '\\ccxt\\PermissionDenied', // "pme_max_total_open_orders {Limit}" Total limit of open orders has been exceeded, it is applicable for PME users
+                '10014' => '\\ccxt\\PermissionDenied', // "pme_max_future_open_orders {Limit}" Limit of count of futures' open orders has been exceeded, it is applicable for PME users
+                '10015' => '\\ccxt\\PermissionDenied', // "pme_max_option_open_orders {Limit}" Limit of count of options' open orders has been exceeded, it is applicable for PME users
+                '10016' => '\\ccxt\\PermissionDenied', // "pme_max_future_open_orders_size {Limit}" Limit of size for futures has been exceeded, it is applicable for PME users
+                '10017' => '\\ccxt\\PermissionDenied', // "pme_max_option_open_orders_size {Limit}" Limit of size for options has been exceeded, it is applicable for PME users
+                '10019' => '\\ccxt\\PermissionDenied', // "locked_by_admin" Trading is temporary locked by admin
+                '10020' => '\\ccxt\\ExchangeError', // "invalid_or_unsupported_instrument" Instrument name is not valid
+                '10022' => '\\ccxt\\InvalidOrder', // "invalid_quantity" quantity was not recognized as a valid number
+                '10023' => '\\ccxt\\InvalidOrder', // "invalid_price" price was not recognized as a valid number
+                '10024' => '\\ccxt\\InvalidOrder', // "invalid_max_show" max_show parameter was not recognized as a valid number
+                '10025' => '\\ccxt\\InvalidOrder', // "invalid_order_id" Order id is missing or its format was not recognized as valid
+                '10026' => '\\ccxt\\InvalidOrder', // "price_precision_exceeded" Extra precision of the price is not supported
+                '10027' => '\\ccxt\\InvalidOrder', // "non_integer_contract_amount" Futures contract amount was not recognized as integer
+                '10028' => '\\ccxt\\DDoSProtection', // "too_many_requests" Allowed request rate has been exceeded
+                '10029' => '\\ccxt\\OrderNotFound', // "not_owner_of_order" Attempt to operate with not own order
+                '10030' => '\\ccxt\\ExchangeError', // "must_be_websocket_request" REST request where Websocket is expected
+                '10031' => '\\ccxt\\ExchangeError', // "invalid_args_for_instrument" Some of arguments are not recognized as valid
+                '10032' => '\\ccxt\\InvalidOrder', // "whole_cost_too_low" Total cost is too low
+                '10033' => '\\ccxt\\NotSupported', // "not_implemented" Method is not implemented yet
+                '10034' => '\\ccxt\\InvalidOrder', // "stop_price_too_high" Stop price is too high
+                '10035' => '\\ccxt\\InvalidOrder', // "stop_price_too_low" Stop price is too low
+                '11035' => '\\ccxt\\InvalidOrder', // "no_more_stops {Limit}" Allowed amount of stop orders has been exceeded
+                '11036' => '\\ccxt\\InvalidOrder', // "invalid_stoppx_for_index_or_last" Invalid StopPx (too high or too low) as to current index or market
+                '11037' => '\\ccxt\\InvalidOrder', // "outdated_instrument_for_IV_order" Instrument already not available for trading
+                '11038' => '\\ccxt\\InvalidOrder', // "no_adv_for_futures" Advanced orders are not available for futures
+                '11039' => '\\ccxt\\InvalidOrder', // "no_adv_postonly" Advanced post-only orders are not supported yet
+                '11040' => '\\ccxt\\InvalidOrder', // "impv_not_in_range 0..499%" Implied volatility is out of allowed range
+                '11041' => '\\ccxt\\InvalidOrder', // "not_adv_order" Advanced order properties can't be set if the order is not advanced
+                '11042' => '\\ccxt\\PermissionDenied', // "permission_denied" Permission for the operation has been denied
+                '11044' => '\\ccxt\\OrderNotFound', // "not_open_order" Attempt to do open order operations with the not open order
+                '11045' => '\\ccxt\\ExchangeError', // "invalid_event" Event name has not been recognized
+                '11046' => '\\ccxt\\ExchangeError', // "outdated_instrument" At several minutes to instrument expiration, corresponding advanced implied volatility orders are not allowed
+                '11047' => '\\ccxt\\ExchangeError', // "unsupported_arg_combination" The specified combination of arguments is not supported
+                '11048' => '\\ccxt\\ExchangeError', // "not_on_this_server" The requested operation is not available on this server.
+                '11050' => '\\ccxt\\ExchangeError', // "invalid_request" Request has not been parsed properly
+                '11051' => '\\ccxt\\ExchangeNotAvailable', // "system_maintenance" System is under maintenance
+                '11030' => '\\ccxt\\ExchangeError', // "other_reject {Reason}" Some rejects which are not considered as very often, more info may be specified in {Reason}
+                '11031' => '\\ccxt\\ExchangeError', // "other_error {Error}" Some errors which are not considered as very often, more info may be specified in {Error}
             ),
             'options' => array (
                 'fetchTickerQuotes' => true,
@@ -83,7 +134,7 @@ class deribit extends Exchange {
         ));
     }
 
-    public function fetch_markets () {
+    public function fetch_markets ($params = array ()) {
         $marketsResponse = $this->publicGetGetinstruments ();
         $markets = $marketsResponse['result'];
         $result = array ();
@@ -139,7 +190,7 @@ class deribit extends Exchange {
         return array (
             'currency' => 'BTC',
             'address' => $account['depositAddress'],
-            'status' => 'ok',
+            'tag' => null,
             'info' => $account,
         );
     }
@@ -235,51 +286,52 @@ class deribit extends Exchange {
             'filled' => 'closed',
         );
         if (is_array ($statuses) && array_key_exists ($status, $statuses)) {
-            return $statuses['status'];
+            return $statuses[$status];
         }
         return $status;
     }
 
     public function parse_order ($order, $market = null) {
-        // .
+        //
         //     {
-        //         "success" => true,  // true or false
-        //         "message" => "",    // empty or text message, e.g. error message
-        //         "result" => array (       // list of open orders
-        //         {
-        //                 "orderId" => 5258039,          // ID of the $order
-        //                 "instrument" => "BTC-26MAY17", // instrument name
-        //                 "direction" => "sell",         // $order direction, "buy" or "sell"
-        //                 "$price" => 1860,               // float, USD for futures, BTC for options
-        //                 "label" => "",                 // label set by the owner, up to 32 chars
-        //                 "quantity" => 10,              // quantity, in contracts ($10 per contract for futures, ฿1 — for options)
-        //                 "filledQuantity" => 3,         // $filled quantity, in contracts ($10 per contract for futures, ฿1 — for options)
-        //                 "avgPrice" => 1860,            // average fill $price of the $order
-        //                 "commission" => -0.000001613,  // in BTC units
-        //                 "created" => 1494491899308,    // creation $timestamp
-        //                 "state" => "open",             // open, cancelled, etc
-        //                 "postOnly" => false            // true for post-only orders only
+        //         "orderId" => 5258039,          // ID of the $order
+        //         "$type" => "limit",             // not documented, but present in the actual response
+        //         "instrument" => "BTC-26MAY17", // instrument name ($market $id)
+        //         "direction" => "sell",         // $order direction, "buy" or "sell"
+        //         "$price" => 1860,               // float, USD for futures, BTC for options
+        //         "label" => "",                 // label set by the owner, up to 32 chars
+        //         "quantity" => 10,              // quantity, in contracts ($10 per contract for futures, ฿1 — for options)
+        //         "filledQuantity" => 3,         // $filled quantity, in contracts ($10 per contract for futures, ฿1 — for options)
+        //         "avgPrice" => 1860,            // $average fill $price of the $order
+        //         "commission" => -0.000001613,  // in BTC units
+        //         "created" => 1494491899308,    // creation $timestamp
+        //         "state" => "open",             // open, cancelled, etc
+        //         "postOnly" => false            // true for post-only orders only
         // open orders --------------------------------------------------------
-        //                 "$lastUpdate" => 1494491988754, // $timestamp of the last $order state change (before this cancelorder of course)
+        //         "$lastUpdate" => 1494491988754, // $timestamp of the last $order state change (before this cancelorder of course)
         // closed orders ------------------------------------------------------
-        //                 "tstamp" => 1494492913288,    // $timestamp of the last $order state change
-        //                 "$modified" => 1494492913289,  // $timestamp of the last db write operation, e.g. trade that doesn't change $order $status
-        //                 "adv" => false                // advanced type (false, or "usd" or "implv")
-        //             }
-        //         )
+        //         "tstamp" => 1494492913288,     // $timestamp of the last $order state change, documented, but may be missing in the actual response
+        //         "modified" => 1494492913289,   // $timestamp of the last db write operation, e.g. trade that doesn't change $order $status, documented, but may missing in the actual response
+        //         "adv" => false                 // advanced $type (false, or "usd" or "implv")
+        //         "trades" => array (),                // not documented, injected from the outside of the parseOrder method into the $order
         //     }
         //
         $timestamp = $this->safe_integer($order, 'created');
         $lastUpdate = $this->safe_integer($order, 'lastUpdate');
-        $lastUpdate = $this->safe_integer($order, 'tstamp', $lastUpdate);
-        $modified = $this->safe_integer($order, 'modified');
-        $lastTradeTimestamp = max ($lastUpdate, $modified);
+        $lastTradeTimestamp = $this->safe_integer_2($order, 'tstamp', 'modified');
         $id = $this->safe_string($order, 'orderId');
         $price = $this->safe_float($order, 'price');
-        $amount = $this->safe_float($order, 'amount');
+        $average = $this->safe_float($order, 'avgPrice');
+        $amount = $this->safe_float($order, 'quantity');
         $filled = $this->safe_float($order, 'filledQuantity');
+        if ($lastTradeTimestamp === null) {
+            if ($filled !== null) {
+                if ($filled > 0) {
+                    $lastTradeTimestamp = $lastUpdate;
+                }
+            }
+        }
         $remaining = null;
-        $price = $this->safe_float($order, 'avgPrice', $price);
         $cost = null;
         if ($filled !== null) {
             if ($amount !== null) {
@@ -289,8 +341,7 @@ class deribit extends Exchange {
                 $cost = $price * $filled;
             }
         }
-        $status = $this->safe_string($order, 'state');
-        $status = $this->parse_order_status($status);
+        $status = $this->parse_order_status($this->safe_string($order, 'state'));
         $side = $this->safe_string($order, 'direction');
         if ($side !== null) {
             $side = strtolower ($side);
@@ -303,6 +354,7 @@ class deribit extends Exchange {
             'cost' => $feeCost,
             'currency' => 'BTC',
         );
+        $type = $this->safe_string($order, 'type');
         return array (
             'info' => $order,
             'id' => $id,
@@ -310,20 +362,22 @@ class deribit extends Exchange {
             'datetime' => $this->iso8601 ($timestamp),
             'lastTradeTimestamp' => $lastTradeTimestamp,
             'symbol' => $order['instrument'],
-            'type' => null,
+            'type' => $type,
             'side' => $side,
             'price' => $price,
             'amount' => $amount,
             'cost' => $cost,
+            'average' => $average,
             'filled' => $filled,
             'remaining' => $remaining,
             'status' => $status,
             'fee' => $fee,
-            'trades' => null,
+            'trades' => null, // todo => parse trades
         );
     }
 
     public function fetch_order ($id, $symbol = null, $params = array ()) {
+        $this->load_markets();
         $response = $this->privateGetOrderstate (array ( 'orderId' => $id ));
         return $this->parse_order($response['result']);
     }
@@ -339,7 +393,11 @@ class deribit extends Exchange {
             $request['price'] = $price;
         $method = 'privatePost' . $this->capitalize ($side);
         $response = $this->$method (array_merge ($request, $params));
-        return $this->parse_order($response['result']);
+        $order = $this->safe_value($response['result'], 'order');
+        if ($order === null) {
+            return $response;
+        }
+        return $this->parse_order($order);
     }
 
     public function edit_order ($id, $symbol, $type, $side, $amount = null, $price = null, $params = array ()) {
@@ -352,13 +410,13 @@ class deribit extends Exchange {
         if ($price !== null)
             $request['price'] = $price;
         $response = $this->privatePostEdit (array_merge ($request, $params));
-        return $this->parse_order($response['result']);
+        return $this->parse_order($response['result']['order']);
     }
 
     public function cancel_order ($id, $symbol = null, $params = array ()) {
         $this->load_markets();
         $response = $this->privatePostCancel (array_merge (array ( 'orderId' => $id ), $params));
-        return $this->parse_order($response['result']);
+        return $this->parse_order($response['result']['order']);
     }
 
     public function fetch_open_orders ($symbol = null, $since = null, $limit = null, $params = array ()) {
@@ -414,13 +472,33 @@ class deribit extends Exchange {
                 $auth .= '&' . $this->urlencode ($params);
             }
             $hash = $this->hash ($this->encode ($auth), 'sha256', 'base64');
-            $signature = $this->apiKey . '.' . $nonce . '.' . $hash;
+            $signature = $this->apiKey . '.' . $nonce . '.' . $this->decode ($hash);
             $headers = array (
-                'Content-Type' => 'application/x-www-form-urlencoded',
                 'x-deribit-sig' => $signature,
             );
-            $body = $this->urlencode ($params);
+            if ($method !== 'GET') {
+                $headers['Content-Type'] = 'application/x-www-form-urlencoded';
+                $body = $this->urlencode ($params);
+            }
         }
         return array ( 'url' => $url, 'method' => $method, 'body' => $body, 'headers' => $headers );
+    }
+
+    public function handle_errors ($httpCode, $reason, $url, $method, $headers, $body, $response) {
+        if (!$response) {
+            return; // fallback to default $error handler
+        }
+        //
+        //     array ("usOut":1535877098645376,"usIn":1535877098643364,"usDiff":2012,"testnet":false,"success":false,"message":"order_not_found","$error":10004)
+        //
+        $error = $this->safe_string($response, 'error');
+        if (($error !== null) && ($error !== '0')) {
+            $feedback = $this->id . ' ' . $body;
+            $exceptions = $this->exceptions;
+            if (is_array ($exceptions) && array_key_exists ($error, $exceptions)) {
+                throw new $exceptions[$error] ($feedback);
+            }
+            throw new ExchangeError ($feedback); // unknown message
+        }
     }
 }

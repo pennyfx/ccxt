@@ -264,8 +264,8 @@ def test_exchange(exchange):
         return
 
     # move to testnet/sandbox if possible before accessing the balance if possible
-    if 'test' in exchange.urls:
-        exchange.urls['api'] = exchange.urls['test']
+    # if 'test' in exchange.urls:
+    #     exchange.urls['api'] = exchange.urls['test']
 
     exchange.fetch_balance()
     dump(green(exchange.id), 'fetched balance')
@@ -357,6 +357,8 @@ with open(keys_file) as file:
 
 # instantiate all exchanges
 for id in ccxt.exchanges:
+    if id == 'theocean' or id == 'theocean1':
+        continue
     exchange = getattr(ccxt, id)
     exchange_config = {'verbose': argv.verbose}
     if sys.version_info[0] < 3:
@@ -372,17 +374,19 @@ def main():
 
     if argv.exchange:
 
-        exchange = exchanges[argv.exchange]
-        symbol = argv.symbol
+        if argv.exchange != 'theocean' and argv.exchange != 'theocean1':
 
-        if hasattr(exchange, 'skip') and exchange.skip:
-            dump(green(exchange.id), 'skipped')
-        else:
-            if symbol:
-                load_exchange(exchange)
-                test_symbol(exchange, symbol)
+            exchange = exchanges[argv.exchange]
+            symbol = argv.symbol
+
+            if hasattr(exchange, 'skip') and exchange.skip:
+                dump(green(exchange.id), 'skipped')
             else:
-                try_all_proxies(exchange, proxies)
+                if symbol:
+                    load_exchange(exchange)
+                    test_symbol(exchange, symbol)
+                else:
+                    try_all_proxies(exchange, proxies)
 
     else:
         for exchange in sorted(exchanges.values(), key=lambda x: x.id):

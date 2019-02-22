@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 const liqui = require ('./liqui.js');
-const { ExchangeError, InsufficientFunds, DDoSProtection } = require ('./base/errors');
+const { ExchangeError, InsufficientFunds, AuthenticationError } = require ('./base/errors');
 
 // ---------------------------------------------------------------------------
 
@@ -18,6 +18,9 @@ module.exports = class yobit extends liqui {
             'has': {
                 'createDepositAddress': true,
                 'fetchDepositAddress': true,
+                'fetchDeposits': false,
+                'fetchWithdrawals': false,
+                'fetchTransactions': false,
                 'CORS': false,
                 'withdraw': true,
             },
@@ -82,7 +85,6 @@ module.exports = class yobit extends liqui {
                 'COV': 'Coven Coin',
                 'COVX': 'COV',
                 'CPC': 'Capricoin',
-                'CRC': 'CryCash',
                 'CS': 'CryptoSpots',
                 'DCT': 'Discount',
                 'DGD': 'DarkGoldCoin',
@@ -100,6 +102,7 @@ module.exports = class yobit extends liqui {
                 'GEN': 'Genstake',
                 'GENE': 'Genesiscoin',
                 'GOLD': 'GoldMint',
+                'GOT': 'Giotto Coin',
                 'HTML5': 'HTML',
                 'HYPERX': 'HYPER',
                 'ICN': 'iCoin',
@@ -133,6 +136,14 @@ module.exports = class yobit extends liqui {
             },
             'options': {
                 'fetchOrdersRequiresSymbol': true,
+                'fetchTickersMaxLength': 512,
+            },
+            'exceptions': {
+                'broad': {
+                    'Total transaction amount': ExchangeError, // { "success": 0, "error": "Total transaction amount is less than minimal total: 0.00010000"}
+                    'Insufficient funds': InsufficientFunds,
+                    'invalid key': AuthenticationError,
+                },
             },
         });
     }
@@ -172,7 +183,7 @@ module.exports = class yobit extends liqui {
                         account = this.account ();
                     }
                     account[key] = balances[side][lowercase];
-                    if ((typeof account['total'] !== 'undefined') && (typeof account['free'] !== 'undefined'))
+                    if ((account['total'] !== undefined) && (account['free'] !== undefined))
                         account['used'] = account['total'] - account['free'];
                     result[currency] = account;
                 }
@@ -213,6 +224,45 @@ module.exports = class yobit extends liqui {
         };
     }
 
+    async fetchMyTrades (symbol = undefined, since = undefined, limit = undefined, params = {}) {
+        await this.loadMarkets ();
+        let market = undefined;
+        // some derived classes use camelcase notation for request fields
+        let request = {
+            // 'from': 123456789, // trade ID, from which the display starts numerical 0 (test result: liqui ignores this field)
+            // 'count': 1000, // the number of trades for display numerical, default = 1000
+            // 'from_id': trade ID, from which the display starts numerical 0
+            // 'end_id': trade ID on which the display ends numerical ∞
+            // 'order': 'ASC', // sorting, default = DESC (test result: liqui ignores this field, most recent trade always goes last)
+            // 'since': 1234567890, // UTC start time, default = 0 (test result: liqui ignores this field)
+            // 'end': 1234567890, // UTC end time, default = ∞ (test result: liqui ignores this field)
+            // 'pair': 'eth_btc', // default = all markets
+        };
+        if (symbol !== undefined) {
+            market = this.market (symbol);
+            request['pair'] = market['id'];
+        }
+        if (limit !== undefined) {
+            request['count'] = parseInt (limit);
+        }
+        if (since !== undefined) {
+            request['since'] = parseInt (since / 1000);
+        }
+        let method = this.options['fetchMyTradesMethod'];
+        let response = await this[method] (this.extend (request, params));
+        let trades = this.safeValue (response, 'return', {});
+        let ids = Object.keys (trades);
+        let result = [];
+        for (let i = 0; i < ids.length; i++) {
+            const id = ids[i];
+            const trade = this.parseTrade (this.extend (trades[id], {
+                'trade_id': id,
+            }), market);
+            result.push (trade);
+        }
+        return this.filterBySymbolSinceLimit (result, symbol, since, limit);
+    }
+
     async withdraw (code, amount, address, tag = undefined, params = {}) {
         this.checkAddress (address);
         await this.loadMarkets ();
@@ -226,25 +276,5 @@ module.exports = class yobit extends liqui {
             'info': response,
             'id': undefined,
         };
-    }
-
-    handleErrors (code, reason, url, method, headers, body) {
-        if (body[0] === '{') {
-            let response = JSON.parse (body);
-            if ('success' in response) {
-                if (!response['success']) {
-                    if ('error_log' in response) {
-                        if (response['error_log'].indexOf ('Insufficient funds') >= 0) { // not enougTh is a typo inside Liqui's own API...
-                            throw new InsufficientFunds (this.id + ' ' + this.json (response));
-                        } else if (response['error_log'] === 'Requests too often') {
-                            throw new DDoSProtection (this.id + ' ' + this.json (response));
-                        } else if ((response['error_log'] === 'not available') || (response['error_log'] === 'external service unavailable')) {
-                            throw new DDoSProtection (this.id + ' ' + this.json (response));
-                        }
-                    }
-                    throw new ExchangeError (this.id + ' ' + this.json (response));
-                }
-            }
-        }
     }
 };

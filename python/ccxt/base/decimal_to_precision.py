@@ -40,16 +40,23 @@ def decimal_to_precision(n, rounding_mode=ROUND, precision=None, counting_mode=D
     context.traps[decimal.Underflow] = True
     context.rounding = decimal.ROUND_HALF_UP  # rounds 0.5 away from zero
 
-    dec = decimal.Decimal(n)
-    string = str(dec)
+    dec = decimal.Decimal(str(n))
+    string = '{:f}'.format(dec)  # convert to string using .format to avoid engineering notation
     precise = None
 
     def power_of_10(x):
         return decimal.Decimal('10') ** (-x)
 
+    if precision < 0:
+        to_nearest = power_of_10(precision)
+        if rounding_mode == ROUND:
+            return "{:f}".format(to_nearest * decimal.Decimal(decimal_to_precision(dec / to_nearest, rounding_mode, 0, DECIMAL_PLACES, padding_mode)))
+        elif rounding_mode == TRUNCATE:
+            return decimal_to_precision(dec - dec % to_nearest, rounding_mode, 0, DECIMAL_PLACES, padding_mode)
+
     if rounding_mode == ROUND:
         if counting_mode == DECIMAL_PLACES:
-            precise = str(dec.quantize(power_of_10(precision)))  # ROUND_HALF_EVEN is default context
+            precise = '{:f}'.format(dec.quantize(power_of_10(precision)))  # ROUND_HALF_EVEN is default context
         elif counting_mode == SIGNIFICANT_DIGITS:
             q = precision - dec.adjusted() - 1
             sigfig = power_of_10(q)
@@ -58,9 +65,11 @@ def decimal_to_precision(n, rounding_mode=ROUND, precision=None, counting_mode=D
                 # string_to_precision is '' when we have zero precision
                 below = sigfig * decimal.Decimal(string_to_precision if string_to_precision else '0')
                 above = below + sigfig
-                precise = str(min((below, above), key=lambda x: abs(x - dec)))
+                precise = '{:f}'.format(min((below, above), key=lambda x: abs(x - dec)))
             else:
-                precise = str(dec.quantize(sigfig))
+                precise = '{:f}'.format(dec.quantize(sigfig))
+        if precise == ('-0.' + len(precise) * '0')[:2] or precise == '-0':
+            precise = precise[1:]
 
     elif rounding_mode == TRUNCATE:
         # Slice a string
@@ -76,7 +85,12 @@ def decimal_to_precision(n, rounding_mode=ROUND, precision=None, counting_mode=D
             # need to clarify these conditionals
             if dot >= end:
                 end -= 1
-            precise = string[:end].ljust(dot, '0')
+            if precision >= len(string.replace('.', '')):
+                precise = string
+            else:
+                precise = string[:end].ljust(dot, '0')
+        if precise == ('-0.' + len(precise) * '0')[:3] or precise == '-0':
+            precise = precise[1:]
         precise = precise.rstrip('.')
 
     if padding_mode == NO_PADDING:

@@ -5,7 +5,6 @@
 
 from ccxt.base.exchange import Exchange
 from ccxt.base.errors import ExchangeError
-from ccxt.base.decimal_to_precision import ROUND
 
 
 class flowbtc (Exchange):
@@ -70,7 +69,7 @@ class flowbtc (Exchange):
             },
         })
 
-    def fetch_markets(self):
+    def fetch_markets(self, params={}):
         response = self.publicPostGetProductPairs()
         markets = response['productPairs']
         result = {}
@@ -188,9 +187,6 @@ class flowbtc (Exchange):
             'startIndex': -1,
         }, params))
         return self.parse_trades(response['trades'], market, since, limit)
-
-    def price_to_precision(self, symbol, price):
-        return self.decimal_to_precision(price, ROUND, self.markets[symbol]['precision']['price'], self.precisionMode)
 
     def create_order(self, symbol, type, side, amount, price=None, params={}):
         self.load_markets()

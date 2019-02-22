@@ -25,8 +25,8 @@ class bitsane extends Exchange {
                 'logo' => 'https://user-images.githubusercontent.com/1294454/41387105-d86bf4c6-6f8d-11e8-95ea-2fa943872955.jpg',
                 'api' => 'https://bitsane.com/api',
                 'www' => 'https://bitsane.com',
-                'doc' => 'https://bitsane.com/info-api',
-                'fees' => 'https://bitsane.com/fees',
+                'doc' => 'https://bitsane.com/help/api',
+                'fees' => 'https://bitsane.com/help/fees',
             ),
             'api' => array (
                 'public' => array (
@@ -129,7 +129,7 @@ class bitsane extends Exchange {
         return $result;
     }
 
-    public function fetch_markets () {
+    public function fetch_markets ($params = array ()) {
         $markets = $this->publicGetAssetsPairs ();
         $result = array ();
         $marketIds = is_array ($markets) ? array_keys ($markets) : array ();
@@ -150,7 +150,6 @@ class bitsane extends Exchange {
                 'amount' => intval ($market['precision']),
                 'price' => 8,
             );
-            $lot = pow (10, -$precision['amount']);
             $result[] = array (
                 'id' => $id,
                 'symbol' => $symbol,
@@ -159,7 +158,6 @@ class bitsane extends Exchange {
                 'baseId' => $market['base'],
                 'quoteId' => $market['quote'],
                 'active' => true,
-                'lot' => $lot,
                 'precision' => $precision,
                 'limits' => array (
                     'amount' => array (
@@ -200,8 +198,8 @@ class bitsane extends Exchange {
             'close' => $last,
             'last' => $last,
             'previousClose' => null,
-            'change' => $this->safe_float($ticker, 'percentChange'),
-            'percentage' => null,
+            'change' => null,
+            'percentage' => $this->safe_float($ticker, 'percentChange'),
             'average' => null,
             'baseVolume' => $this->safe_float($ticker, 'baseVolume'),
             'quoteVolume' => $this->safe_float($ticker, 'quoteVolume'),
@@ -237,7 +235,7 @@ class bitsane extends Exchange {
         return $result;
     }
 
-    public function fetch_order_book ($symbol, $params = array ()) {
+    public function fetch_order_book ($symbol, $limit = null, $params = array ()) {
         $this->load_markets();
         $response = $this->publicGetOrderbook (array_merge (array (
             'pair' => $this->market_id($symbol),
@@ -395,6 +393,7 @@ class bitsane extends Exchange {
         return array (
             'currency' => $code,
             'address' => $address,
+            'tag' => null,
             'info' => $response,
         );
     }
@@ -426,23 +425,24 @@ class bitsane extends Exchange {
             $body = array_merge (array (
                 'nonce' => $this->nonce (),
             ), $params);
-            $body = base64_encode ($this->json ($body));
+            $payload = $this->json ($body);
+            $payload64 = base64_encode ($this->encode ($payload));
+            $body = $this->decode ($payload64);
             $headers = array (
                 'X-BS-APIKEY' => $this->apiKey,
                 'X-BS-PAYLOAD' => $body,
-                'X-BS-SIGNATURE' => $this->hmac ($this->encode ($body), $this->encode ($this->secret), 'sha384'),
+                'X-BS-SIGNATURE' => $this->hmac ($payload64, $this->encode ($this->secret), 'sha384'),
             );
         }
         return array ( 'url' => $url, 'method' => $method, 'body' => $body, 'headers' => $headers );
     }
 
-    public function handle_errors ($httpCode, $reason, $url, $method, $headers, $body) {
+    public function handle_errors ($httpCode, $reason, $url, $method, $headers, $body, $response) {
         if (gettype ($body) !== 'string')
             return; // fallback to default error handler
         if (strlen ($body) < 2)
             return; // fallback to default error handler
         if (($body[0] === '{') || ($body[0] === '[')) {
-            $response = json_decode ($body, $as_associative_array = true);
             $statusCode = $this->safe_string($response, 'statusCode');
             if ($statusCode !== null) {
                 if ($statusCode !== '0') {

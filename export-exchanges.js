@@ -5,7 +5,7 @@ const countries = require ('./countries')
 const asTable   = require ('as-table')
 const util      = require ('util')
 const execSync  = require ('child_process').execSync
-const log       = require ('ololog')
+const log       = require ('ololog').unlimited
 const ansi      = require ('ansicolor').nice
 
 // ---------------------------------------------------------------------------
@@ -17,9 +17,13 @@ let verbose = false
 
 let wikiPath = 'wiki'
 let gitWikiPath = 'ccxt.wiki'
+let ccxtCertifiedBadge = '[![CCXT Certified](https://img.shields.io/badge/CCXT-certified-green.svg)](https://github.com/ccxt/ccxt/wiki/Certification)'
+let spacing = '&nbsp;'.repeat (7)
+let logoHeading = spacing + 'logo' + spacing
+let tableHeadings = [ logoHeading, 'id', 'name', 'ver', 'doc', 'certified', ]
+let exchangesByCountryHeading = [ 'country / region', ... tableHeadings ]
 
 if (!fs.existsSync (gitWikiPath)) {
-
     log.bright.cyan ('Checking out ccxt.wiki...')
     execSync ('git clone https://github.com/ccxt/ccxt.wiki.git')
 }
@@ -27,18 +31,25 @@ if (!fs.existsSync (gitWikiPath)) {
 // ---------------------------------------------------------------------------
 
 function replaceInFile (filename, regex, replacement) {
+    log.bright.cyan ('Exporting exchanges →', filename.yellow)
     let contents = fs.readFileSync (filename, 'utf8')
-    const parts = contents.split (regex)
-    const newContents = parts[0] + replacement + parts[1]
+    const newContents = contents.replace (regex, replacement)
     fs.truncateSync (filename)
     fs.writeFileSync (filename, newContents)
 }
 
 // ---------------------------------------------------------------------------
 
+const includedIds = fs.readFileSync ('exchanges.cfg')
+                        .toString () // Buffer → String
+                        .split ('\n') // String → Array
+                        .map (line => line.split ('#')[0].trim ()) // trim comments
+                        .filter (exchange => exchange); // filter empty lines
+
+const isIncluded = (id) => ((includedIds.length === 0) || includedIds.includes (id))
 try {
 
-    exchanges = require ('./config')
+    exchanges = require ('./config').ids.filter (isIncluded)
 
 } catch (e) {
 
@@ -47,6 +58,7 @@ try {
     const ids = fs.readdirSync ('./js/')
                   .filter (file => file.includes ('.js'))
                   .map (file => file.slice (0, -3))
+                  .filter (isIncluded);
 
     const pad = function (string, n) {
         return (string + ' '.repeat (n)).slice (0, n)
@@ -69,12 +81,12 @@ try {
             replacement: ids.map (id => pad ('from ccxt.' + id + ' import ' + id, 60) + '# noqa: F401').join ("\n") + "\n\nexchanges",
         },
         {
-            file: './python/ccxt/async/__init__.py',
-            regex: /(?:from ccxt\.async\.[^\.]+ import [^\s]+\s+\# noqa\: F401[\r]?[\n])+[\r]?[\n]exchanges/,
-            replacement: ids.map (id => pad ('from ccxt.async.' + id + ' import ' + id, 64) + '# noqa: F401').join ("\n") + "\n\nexchanges",
+            file: './python/ccxt/async_support/__init__.py',
+            regex: /(?:from ccxt\.async_support\.[^\.]+ import [^\s]+\s+\# noqa\: F401[\r]?[\n])+[\r]?[\n]exchanges/,
+            replacement: ids.map (id => pad ('from ccxt.async_support.' + id + ' import ' + id, 74) + '# noqa: F401').join ("\n") + "\n\nexchanges",
         },
         {
-            file: './python/ccxt/async/__init__.py',
+            file: './python/ccxt/async_support/__init__.py',
             regex: /exchanges \= \[[^\]]+\]/,
             replacement: "exchanges = [\n" + "    '" + ids.join ("',\n    '") + "'," + "\n]",
         },
@@ -85,10 +97,7 @@ try {
         },
 
     ].forEach (({ file, regex, replacement }) => {
-
-        log.bright.cyan ('Exporting exchanges →', file.yellow)
         replaceInFile (file, regex, replacement)
-
     })
 
     exchanges = {}
@@ -107,6 +116,7 @@ const ccxt = require ('./ccxt.js')
 // ----------------------------------------------------------------------------
 
 for (let id in exchanges) {
+    ccxt[id].prototype.checkRequiredDependencies = () => {}
     exchanges[id] = new (ccxt)[id] (exchanges[id])
     exchanges[id].verbose = verbose
 }
@@ -114,7 +124,7 @@ for (let id in exchanges) {
 // console.log (Object.values (ccxt).length)
 
 var countryName = function (code) {
-    return ((typeof countries[code] !== 'undefined') ? countries[code] : code)
+    return ((countries[code] !== undefined) ? countries[code] : code)
 }
 
 let sleep = async ms => await new Promise (resolve => setTimeout (resolve, ms))
@@ -132,49 +142,48 @@ let values = Object.values (exchanges).map (exchange => {
     let matches = version.match (/[^0-9]*([0-9].*)/)
     if (matches)
         version = matches[1];
-    return {
-        '': '![' + exchange.id + '](' + logo + ')',
-        'id': exchange.id,
-        'name': '[' + exchange.name + '](' + url + ')',
-        'ver': version,
-        'doc': '[API](' + doc + ')',
-        'countries': countries,
-    }
+    return [
+        '[![' + exchange.id + '](' + logo + ')](' + url + ')',
+        exchange.id,
+        '[' + exchange.name + '](' + url + ')',
+        version,
+        '[API](' + doc + ')',
+        exchange.certified ? ccxtCertifiedBadge : '',
+        countries,
+    ]
 })
 
-let numExchanges = Object.keys (exchanges).length
-let table = asTable.configure ({ delimiter: ' | ' }) (values)
+values.splice (0, 0, tableHeadings)
 
-let lines = table.split ("\n")
-lines[1] = lines[0].replace (/[^\|]/g, '-')
-
-let headerLine = lines[1].split ('|')
-
-headerLine[3] = ':' + headerLine[3].slice (1, headerLine[3].length - 1) + ':'
-headerLine[4] = ':' + headerLine[4].slice (1, headerLine[4].length - 1) + ':'
-lines[1] = headerLine.join ('|')
-
-lines = lines.map (line => '|' + line + '|').join ("\n")
-
-let changeInFile = (filename, prefix = '') => {
-    log.bright ('Exporting exchanges to'.cyan, filename.yellow, '...')
-    let oldContent = fs.readFileSync (filename, 'utf8')
-    let beginning = prefix + "The ccxt library currently supports the following "
-    let ending = " cryptocurrency exchange markets and trading APIs:\n\n"
-    let regex = new RegExp ("[^\n]+[\n][\n]\\|[^#]+\\|([\n][\n]|[\n]$|$)", 'm')
-    let totalString = beginning + numExchanges + ending
-    let replacement = totalString + lines + "$1"
-    let newContent = oldContent.replace(/[\r]/, '').replace (regex, replacement)
-    fs.truncateSync (filename)
-    fs.writeFileSync (filename, newContent)
+function makeTable (jsonArray) {
+    let table = asTable.configure ({ 'delimiter': ' | ' }) (jsonArray)
+    let lines = table.split ("\n")
+    lines.splice (1,0, lines[0].replace (/[^\|]/g, '-'))
+    let headerLine = lines[1].split ('|')
+    headerLine[3] = ':' + headerLine[3].slice (1, headerLine[3].length - 1) + ':'
+    headerLine[4] = ':' + headerLine[4].slice (1, headerLine[4].length - 1) + ':'
+    lines[1] = headerLine.join ('|')
+    return lines.map (line => '|' + line + '|').join ("\n")
 }
 
-changeInFile ('README.md')
-changeInFile (wikiPath + '/Manual.md')
-changeInFile (wikiPath + '/Exchange-Markets.md')//, "# Supported Exchanges\n\n")
+let exchangesTable = makeTable (values)
+let numExchanges = Object.keys (exchanges).length
+let beginning = "The ccxt library currently supports the following "
+let ending = " cryptocurrency exchange markets and trading APIs:\n\n"
+let totalString = beginning + numExchanges + ending
+let howMany = totalString + exchangesTable + "$1"
+let allExchangesRegex = new RegExp ("[^\n]+[\n]{2}\\|[^#]+\\|([\n][\n]|[\n]$|$)", 'm')
+replaceInFile ('README.md', allExchangesRegex, howMany)
+replaceInFile (wikiPath + '/Manual.md', allExchangesRegex, howMany)
+replaceInFile (wikiPath + '/Exchange-Markets.md', allExchangesRegex, howMany)
 
-// console.log (typeof countries)
-// console.log (countries)
+let certifiedFieldIndex = tableHeadings.indexOf ('certified')
+let certified = values.filter ((x) => x[certifiedFieldIndex] !== '' )
+let allCertifiedRegex = new RegExp ("^(## Certified Cryptocurrency Exchanges\n{3})(?:\\|.+\\|$\n)+", 'm')
+let certifiedTable = makeTable (certified)
+let certifiedTableReplacement = '$1' + certifiedTable + "\n"
+replaceInFile ('README.md', allCertifiedRegex, certifiedTableReplacement)
+
 
 let exchangesByCountries = []
 Object.keys (countries).forEach (code => {
@@ -199,24 +208,25 @@ Object.keys (countries).forEach (code => {
                 shouldInclude = true
         }
         if (shouldInclude) {
-            result.push ({
-                'country / region': country,
-                'logo': ' ![' + exchange.id + '](' + logo + ') ',
-                'id': exchange.id,
-                'name': '[' + exchange.name + '](' + url + ')',
-                'ver': version,
-                'doc': ' [API](' + doc + ') ',
-            })
+            let entry = [
+                '[![' + exchange.id + '](' + logo + ')](' + url + ')',
+                country,
+                exchange.id,
+                '[' + exchange.name + '](' + url + ')',
+                exchange.certified ? ccxtCertifiedBadge : '',
+                version,
+                '[API](' + doc + ')',
+            ]
+            result.push (entry)
         }
     })
     exchangesByCountries = exchangesByCountries.concat (result)
 });
 
+let countryKeyIndex = exchangesByCountryHeading.indexOf ('country / region')
 exchangesByCountries = exchangesByCountries.sort ((a, b) => {
-    let countryA = a['country / region'].toLowerCase ()
-    let countryB = b['country / region'].toLowerCase ()
-    let idA = a['id']
-    let idB = b['id']
+    let countryA = a[countryKeyIndex].toLowerCase ()
+    let countryB = b[countryKeyIndex].toLowerCase ()
     if (countryA > countryB) {
         return 1
     } else if (countryA < countryB) {
@@ -229,23 +239,14 @@ exchangesByCountries = exchangesByCountries.sort ((a, b) => {
         else
             return 0;
     }
-    return 0;
 })
 
-;(() => {
-    let table = asTable.configure ({ delimiter: ' | ' }) (exchangesByCountries)
-    let lines = table.split ("\n")
-    lines[1] = lines[0].replace (/[^\|]/g, '-')
-    let headerLine = lines[1].split ('|')
-    headerLine[4] = ':' + headerLine[4].slice (1, headerLine[4].length - 1) + ':'
-    headerLine[5] = ':' + headerLine[5].slice (1, headerLine[5].length - 1) + ':'
-    lines[1] = headerLine.join ('|')
-    lines = lines.map (line => '|' + line + '|').join ("\n")
-    let result = "# Exchanges By Country\n\nThe ccxt library currently supports the following cryptocurrency exchange markets and trading APIs:\n\n" + lines + "\n\n"
-    let filename = wikiPath + '/Exchange-Markets-By-Country.md'
-    fs.truncateSync (filename)
-    fs.writeFileSync (filename, result)
-}) ();
+exchangesByCountries.splice (0, 0, exchangesByCountryHeading)
+let lines = makeTable (exchangesByCountries)
+let result = "# Exchanges By Country\n\nThe ccxt library currently supports the following cryptocurrency exchange markets and trading APIs:\n\n" + lines + "\n\n"
+let filename = wikiPath + '/Exchange-Markets-By-Country.md'
+fs.truncateSync (filename)
+fs.writeFileSync (filename, result)
 
 log.bright ('Exporting exchange ids to'.cyan, 'exchanges.json'.yellow)
 fs.writeFileSync ('exchanges.json', JSON.stringify ({ ids: Object.keys (exchanges) }, null, 4))

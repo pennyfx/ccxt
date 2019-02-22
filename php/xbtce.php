@@ -17,7 +17,6 @@ class xbtce extends Exchange {
             'rateLimit' => 2000, // responses are cached every 2 seconds
             'version' => 'v1',
             'has' => array (
-                'publicAPI' => false,
                 'CORS' => false,
                 'fetchTickers' => true,
                 'createMarketOrder' => false,
@@ -106,7 +105,7 @@ class xbtce extends Exchange {
         ));
     }
 
-    public function fetch_markets () {
+    public function fetch_markets ($params = array ()) {
         $markets = $this->privateGetSymbol ();
         $result = array ();
         for ($p = 0; $p < count ($markets); $p++) {

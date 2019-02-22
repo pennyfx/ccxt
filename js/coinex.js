@@ -3,8 +3,7 @@
 //  ---------------------------------------------------------------------------
 
 const Exchange = require ('./base/Exchange');
-const { ExchangeError, InsufficientFunds, OrderNotFound, InvalidOrder, AuthenticationError } = require ('./base/errors');
-const { ROUND, TRUNCATE } = require ('./base/functions/number');
+const { ExchangeError, ArgumentsRequired, InsufficientFunds, OrderNotFound, InvalidOrder, AuthenticationError } = require ('./base/errors');
 
 //  ---------------------------------------------------------------------------
 
@@ -23,6 +22,9 @@ module.exports = class coinex extends Exchange {
                 'fetchOpenOrders': true,
                 'fetchClosedOrders': true,
                 'fetchMyTrades': true,
+                'withdraw': true,
+                'fetchDeposits': true,
+                'fetchWithdrawals': true,
             },
             'timeframes': {
                 '1m': '1min',
@@ -69,7 +71,9 @@ module.exports = class coinex extends Exchange {
                 },
                 'private': {
                     'get': [
-                        'balance',
+                        'balance/coin/withdraw',
+                        'balance/coin/deposit',
+                        'balance/info',
                         'order',
                         'order/pending',
                         'order/finished',
@@ -77,10 +81,12 @@ module.exports = class coinex extends Exchange {
                         'order/user/deals',
                     ],
                     'post': [
+                        'balance/coin/withdraw',
                         'order/limit',
                         'order/market',
                     ],
                     'delete': [
+                        'balance/coin/withdraw',
                         'order/pending',
                     ],
                 },
@@ -111,26 +117,13 @@ module.exports = class coinex extends Exchange {
                 'amount': 8,
                 'price': 8,
             },
+            'options': {
+                'createMarketBuyOrderRequiresPrice': true,
+            },
         });
     }
 
-    costToPrecision (symbol, cost) {
-        return this.decimalToPrecision (cost, ROUND, this.markets[symbol]['precision']['price']);
-    }
-
-    priceToPrecision (symbol, price) {
-        return this.decimalToPrecision (price, ROUND, this.markets[symbol]['precision']['price']);
-    }
-
-    amountToPrecision (symbol, amount) {
-        return this.decimalToPrecision (amount, TRUNCATE, this.markets[symbol]['precision']['amount']);
-    }
-
-    feeToPrecision (currency, fee) {
-        return this.decimalToPrecision (fee, ROUND, this.currencies[currency]['precision']);
-    }
-
-    async fetchMarkets () {
+    async fetchMarkets (params = {}) {
         let response = await this.webGetResMarket ();
         let markets = response['data']['market_info'];
         let result = [];
@@ -238,7 +231,7 @@ module.exports = class coinex extends Exchange {
 
     async fetchOrderBook (symbol, limit = 20, params = {}) {
         await this.loadMarkets ();
-        if (typeof limit === 'undefined')
+        if (limit === undefined)
             limit = 20; // default
         const request = {
             'market': this.marketId (symbol),
@@ -251,22 +244,40 @@ module.exports = class coinex extends Exchange {
 
     parseTrade (trade, market = undefined) {
         // this method parses both public and private trades
-        let timestamp = this.safeInteger (trade, 'create_time') * 1000;
-        if (typeof timestamp === 'undefined') {
+        let timestamp = this.safeInteger (trade, 'create_time');
+        if (timestamp === undefined) {
             timestamp = this.safeInteger (trade, 'date_ms');
+        } else {
+            timestamp = timestamp * 1000;
         }
         let tradeId = this.safeString (trade, 'id');
         let orderId = this.safeString (trade, 'order_id');
         let price = this.safeFloat (trade, 'price');
         let amount = this.safeFloat (trade, 'amount');
-        let symbol = market['symbol'];
+        let marketId = this.safeString (trade, 'market');
+        market = this.safeValue (this.markets_by_id, marketId, market);
+        let symbol = undefined;
+        if (market !== undefined) {
+            symbol = market['symbol'];
+        }
         let cost = this.safeFloat (trade, 'deal_money');
-        if (!cost)
+        if (!cost) {
             cost = parseFloat (this.costToPrecision (symbol, price * amount));
-        let fee = {
-            'cost': this.safeFloat (trade, 'fee'),
-            'currency': this.safeString (trade, 'fee_asset'),
-        };
+        }
+        let fee = undefined;
+        let feeCost = this.safeFloat (trade, 'fee');
+        if (feeCost !== undefined) {
+            let feeCurrencyId = this.safeString (trade, 'fee_asset');
+            let feeCurrency = this.safeValue (this.currencies_by_id, feeCurrencyId);
+            let feeCurrencyCode = undefined;
+            if (feeCurrency !== undefined) {
+                feeCurrencyCode = feeCurrency['code'];
+            }
+            fee = {
+                'cost': feeCost,
+                'currency': feeCurrencyCode,
+            };
+        }
         let takerOrMaker = this.safeString (trade, 'role');
         let side = this.safeString (trade, 'type');
         return {
@@ -297,7 +308,7 @@ module.exports = class coinex extends Exchange {
 
     parseOHLCV (ohlcv, market = undefined, timeframe = '5m', since = undefined, limit = undefined) {
         return [
-            ohlcv[0],
+            ohlcv[0] * 1000,
             parseFloat (ohlcv[1]),
             parseFloat (ohlcv[3]),
             parseFloat (ohlcv[4]),
@@ -318,7 +329,27 @@ module.exports = class coinex extends Exchange {
 
     async fetchBalance (params = {}) {
         await this.loadMarkets ();
-        let response = await this.privateGetBalance (params);
+        let response = await this.privateGetBalanceInfo (params);
+        //
+        //     {
+        //       "code": 0,
+        //       "data": {
+        //         "BCH": {                     # BCH account
+        //           "available": "13.60109",   # Available BCH
+        //           "frozen": "0.00000"        # Frozen BCH
+        //         },
+        //         "BTC": {                     # BTC account
+        //           "available": "32590.16",   # Available BTC
+        //           "frozen": "7000.00"        # Frozen BTC
+        //         },
+        //         "ETH": {                     # ETH account
+        //           "available": "5.06000",    # Available ETH
+        //           "frozen": "0.00000"        # Frozen ETH
+        //         }
+        //       },
+        //       "message": "Ok"
+        //     }
+        //
         let result = { 'info': response };
         let balances = response['data'];
         let currencies = Object.keys (balances);
@@ -350,15 +381,55 @@ module.exports = class coinex extends Exchange {
     }
 
     parseOrder (order, market = undefined) {
-        // TODO: check if it's actually milliseconds, since examples were in seconds
+        //
+        // fetchOrder
+        //
+        //     {
+        //         "amount": "0.1",
+        //         "asset_fee": "0.22736197736197736197",
+        //         "avg_price": "196.85000000000000000000",
+        //         "create_time": 1537270135,
+        //         "deal_amount": "0.1",
+        //         "deal_fee": "0",
+        //         "deal_money": "19.685",
+        //         "fee_asset": "CET",
+        //         "fee_discount": "0.5",
+        //         "id": 1788259447,
+        //         "left": "0",
+        //         "maker_fee_rate": "0",
+        //         "market": "ETHUSDT",
+        //         "order_type": "limit",
+        //         "price": "170.00000000",
+        //         "status": "done",
+        //         "taker_fee_rate": "0.0005",
+        //         "type": "sell",
+        //     }
+        //
         let timestamp = this.safeInteger (order, 'create_time') * 1000;
         let price = this.safeFloat (order, 'price');
         let cost = this.safeFloat (order, 'deal_money');
         let amount = this.safeFloat (order, 'amount');
         let filled = this.safeFloat (order, 'deal_amount');
-        let symbol = market['symbol'];
-        let remaining = this.amountToPrecision (symbol, amount - filled);
-        let status = this.parseOrderStatus (order['status']);
+        const average = this.safeFloat (order, 'avg_price');
+        let symbol = undefined;
+        let marketId = this.safeString (order, 'market');
+        market = this.safeValue (this.markets_by_id, marketId);
+        let feeCurrency = undefined;
+        let feeCurrencyId = this.safeString (order, 'fee_asset');
+        let currency = this.safeValue (this.currencies_by_id, feeCurrencyId);
+        if (currency !== undefined) {
+            feeCurrency = currency['code'];
+        }
+        if (market !== undefined) {
+            symbol = market['symbol'];
+            if (feeCurrency === undefined) {
+                feeCurrency = market['quote'];
+            }
+        }
+        let remaining = this.safeFloat (order, 'left');
+        let status = this.parseOrderStatus (this.safeString (order, 'status'));
+        let type = this.safeString (order, 'order_type');
+        let side = this.safeString (order, 'type');
         return {
             'id': this.safeString (order, 'id'),
             'datetime': this.iso8601 (timestamp),
@@ -366,16 +437,17 @@ module.exports = class coinex extends Exchange {
             'lastTradeTimestamp': undefined,
             'status': status,
             'symbol': symbol,
-            'type': order['order_type'],
-            'side': order['type'],
+            'type': type,
+            'side': side,
             'price': price,
             'cost': cost,
+            'average': average,
             'amount': amount,
             'filled': filled,
             'remaining': remaining,
             'trades': undefined,
             'fee': {
-                'currency': market['quote'],
+                'currency': feeCurrency,
                 'cost': this.safeFloat (order, 'deal_fee'),
             },
             'info': order,
@@ -383,17 +455,30 @@ module.exports = class coinex extends Exchange {
     }
 
     async createOrder (symbol, type, side, amount, price = undefined, params = {}) {
+        amount = parseFloat (amount); // this line is deprecated
+        if (type === 'market') {
+            // for market buy it requires the amount of quote currency to spend
+            if (side === 'buy') {
+                if (this.options['createMarketBuyOrderRequiresPrice']) {
+                    if (price === undefined) {
+                        throw new InvalidOrder (this.id + " createOrder() requires the price argument with market buy orders to calculate total order cost (amount to spend), where cost = amount * price. Supply a price argument to createOrder() call if you want the cost to be calculated for you from price and amount, or, alternatively, add .options['createMarketBuyOrderRequiresPrice'] = false to supply the cost in the amount argument (the exchange-specific behaviour)");
+                    } else {
+                        price = parseFloat (price); // this line is deprecated
+                        amount = amount * price;
+                    }
+                }
+            }
+        }
         await this.loadMarkets ();
         let method = 'privatePostOrder' + this.capitalize (type);
         let market = this.market (symbol);
-        amount = parseFloat (amount);
         let request = {
             'market': market['id'],
             'amount': this.amountToPrecision (symbol, amount),
             'type': side,
         };
         if (type === 'limit') {
-            price = parseFloat (price);
+            price = parseFloat (price); // this line is deprecated
             request['price'] = this.priceToPrecision (symbol, price);
         }
         let response = await this[method] (this.extend (request, params));
@@ -414,48 +499,316 @@ module.exports = class coinex extends Exchange {
     }
 
     async fetchOrder (id, symbol = undefined, params = {}) {
+        if (symbol === undefined) {
+            throw new ArgumentsRequired (this.id + ' fetchOrder requires a symbol argument');
+        }
         await this.loadMarkets ();
         let market = this.market (symbol);
         let response = await this.privateGetOrder (this.extend ({
             'id': id,
             'market': market['id'],
         }, params));
+        //
+        //     {
+        //         "code": 0,
+        //         "data": {
+        //             "amount": "0.1",
+        //             "asset_fee": "0.22736197736197736197",
+        //             "avg_price": "196.85000000000000000000",
+        //             "create_time": 1537270135,
+        //             "deal_amount": "0.1",
+        //             "deal_fee": "0",
+        //             "deal_money": "19.685",
+        //             "fee_asset": "CET",
+        //             "fee_discount": "0.5",
+        //             "id": 1788259447,
+        //             "left": "0",
+        //             "maker_fee_rate": "0",
+        //             "market": "ETHUSDT",
+        //             "order_type": "limit",
+        //             "price": "170.00000000",
+        //             "status": "done",
+        //             "taker_fee_rate": "0.0005",
+        //             "type": "sell",
+        //         },
+        //         "message": "Ok"
+        //     }
+        //
         return this.parseOrder (response['data'], market);
     }
 
-    async fetchOpenOrders (symbol = undefined, since = undefined, limit = undefined, params = {}) {
+    async fetchOrdersByStatus (status, symbol = undefined, since = undefined, limit = undefined, params = {}) {
         await this.loadMarkets ();
-        let market = this.market (symbol);
+        if (limit === undefined) {
+            limit = 100;
+        }
         let request = {
-            'market': market['id'],
+            'page': 1,
+            'limit': limit,
         };
-        if (typeof limit !== 'undefined')
-            request['limit'] = limit;
-        let response = await this.privateGetOrderPending (this.extend (request, params));
-        return this.parseOrders (response['data']['data'], market);
+        let market = undefined;
+        if (symbol !== undefined) {
+            market = this.market (symbol);
+            request['market'] = market['id'];
+        }
+        let method = 'privateGetOrder' + this.capitalize (status);
+        let response = await this[method] (this.extend (request, params));
+        return this.parseOrders (response['data']['data'], market, since, limit);
+    }
+
+    async fetchOpenOrders (symbol = undefined, since = undefined, limit = undefined, params = {}) {
+        return await this.fetchOrdersByStatus ('pending', symbol, since, limit, params);
     }
 
     async fetchClosedOrders (symbol = undefined, since = undefined, limit = undefined, params = {}) {
-        await this.loadMarkets ();
-        let market = this.market (symbol);
-        let request = {
-            'market': market['id'],
-        };
-        if (typeof limit !== 'undefined')
-            request['limit'] = limit;
-        let response = await this.privateGetOrderFinished (this.extend (request, params));
-        return this.parseOrders (response['data']['data'], market);
+        return await this.fetchOrdersByStatus ('finished', symbol, since, limit, params);
     }
 
     async fetchMyTrades (symbol = undefined, since = undefined, limit = undefined, params = {}) {
         await this.loadMarkets ();
-        let market = this.market (symbol);
-        let response = await this.privateGetOrderUserDeals (this.extend ({
-            'market': market['id'],
+        if (limit === undefined) {
+            limit = 100;
+        }
+        let request = {
             'page': 1,
-            'limit': 100,
-        }, params));
+            'limit': limit,
+        };
+        let market = undefined;
+        if (symbol !== undefined) {
+            market = this.market (symbol);
+            request['market'] = market['id'];
+        }
+        let response = await this.privateGetOrderUserDeals (this.extend (request, params));
         return this.parseTrades (response['data']['data'], market, since, limit);
+    }
+
+    async withdraw (code, amount, address, tag = undefined, params = {}) {
+        this.checkAddress (address);
+        await this.loadMarkets ();
+        let currency = this.currency (code);
+        if (tag)
+            address = address + ':' + tag;
+        let request = {
+            'coin_type': currency['id'],
+            'coin_address': address,
+            'actual_amount': parseFloat (amount),
+        };
+        let response = await this.privatePostBalanceCoinWithdraw (this.extend (request, params));
+        return {
+            'info': response,
+            'id': this.safeString (response, 'coin_withdraw_id'),
+        };
+    }
+
+    parseTransactionStatus (status) {
+        const statuses = {
+            'audit': 'pending',
+            'pass': 'pending',
+            'processing': 'pending',
+            'confirming': 'pending',
+            'not_pass': 'failed',
+            'cancel': 'canceled',
+            'finish': 'ok',
+            'fail': 'failed',
+        };
+        return this.safeString (statuses, status, status);
+    }
+
+    parseTransaction (transaction, currency = undefined) {
+        //
+        // fetchDeposits
+        //
+        //     {
+        //         "actual_amount": "120.00000000",
+        //         "actual_amount_display": "120",
+        //         "add_explorer": "XXX",
+        //         "amount": "120.00000000",
+        //         "amount_display": "120",
+        //         "coin_address": "XXXXXXXX",
+        //         "coin_address_display": "XXXXXXXX",
+        //         "coin_deposit_id": 1866,
+        //         "coin_type": "USDT",
+        //         "confirmations": 0,
+        //         "create_time": 1539595701,
+        //         "explorer": "",
+        //         "remark": "",
+        //         "status": "finish",
+        //         "status_display": "finish",
+        //         "transfer_method": "local",
+        //         "tx_id": "",
+        //         "tx_id_display": "XXXXXXXXXX"
+        //     }
+        //
+        // fetchWithdrawals
+        //
+        //     {
+        //         "actual_amount": "0.10000000",
+        //         "amount": "0.10000000",
+        //         "coin_address": "15sr1VdyXQ6sVLqeJUJ1uPzLpmQtgUeBSB",
+        //         "coin_type": "BCH",
+        //         "coin_withdraw_id": 203,
+        //         "confirmations": 11,
+        //         "create_time": 1515806440,
+        //         "status": "finish",
+        //         "tx_fee": "0",
+        //         "tx_id": "896371d0e23d64d1cac65a0b7c9e9093d835affb572fec89dd4547277fbdd2f6"
+        //     }
+        //
+        let id = this.safeString2 (transaction, 'coin_withdraw_id', 'coin_deposit_id');
+        let address = this.safeString (transaction, 'coin_address');
+        let tag = this.safeString (transaction, 'remark'); // set but unused
+        if (tag !== undefined) {
+            if (tag.length < 1) {
+                tag = undefined;
+            }
+        }
+        let txid = this.safeValue (transaction, 'tx_id');
+        if (txid !== undefined) {
+            if (txid.length < 1) {
+                txid = undefined;
+            }
+        }
+        let code = undefined;
+        let currencyId = this.safeString (transaction, 'coin_type');
+        if (currencyId in this.currencies_by_id) {
+            currency = this.currencies_by_id[currencyId];
+        } else {
+            code = this.commonCurrencyCode (currencyId);
+        }
+        if (currency !== undefined) {
+            code = currency['code'];
+        }
+        let timestamp = this.safeInteger (transaction, 'create_time');
+        if (timestamp !== undefined) {
+            timestamp = timestamp * 1000;
+        }
+        let type = ('coin_withdraw_id' in transaction) ? 'withdraw' : 'deposit';
+        let status = this.parseTransactionStatus (this.safeString (transaction, 'status'), type);
+        let amount = this.safeFloat (transaction, 'amount');
+        let feeCost = this.safeFloat (transaction, 'tx_fee');
+        if (type === 'deposit') {
+            feeCost = 0;
+        }
+        let fee = {
+            'cost': feeCost,
+            'currency': code,
+        };
+        return {
+            'info': transaction,
+            'id': id,
+            'txid': txid,
+            'timestamp': timestamp,
+            'datetime': this.iso8601 (timestamp),
+            'address': address,
+            'tag': tag,
+            'type': type,
+            'amount': amount,
+            'currency': code,
+            'status': status,
+            'updated': undefined,
+            'fee': fee,
+        };
+    }
+
+    async fetchWithdrawals (code = undefined, since = undefined, limit = undefined, params = {}) {
+        if (code === undefined) {
+            throw new ArgumentsRequired (this.id + ' fetchWithdrawals requires a currency code argument');
+        }
+        const currency = this.currency (code);
+        const request = {
+            'coin_type': currency['id'],
+        };
+        if (limit !== undefined) {
+            request['Limit'] = limit;
+        }
+        const response = await this.privateGetBalanceCoinWithdraw (this.extend (request, params));
+        //
+        //     {
+        //         "code": 0,
+        //         "data": [
+        //             {
+        //                 "actual_amount": "1.00000000",
+        //                 "amount": "1.00000000",
+        //                 "coin_address": "1KAv3pazbTk2JnQ5xTo6fpKK7p1it2RzD4",
+        //                 "coin_type": "BCH",
+        //                 "coin_withdraw_id": 206,
+        //                 "confirmations": 0,
+        //                 "create_time": 1524228297,
+        //                 "status": "audit",
+        //                 "tx_fee": "0",
+        //                 "tx_id": ""
+        //             },
+        //             {
+        //                 "actual_amount": "0.10000000",
+        //                 "amount": "0.10000000",
+        //                 "coin_address": "15sr1VdyXQ6sVLqeJUJ1uPzLpmQtgUeBSB",
+        //                 "coin_type": "BCH",
+        //                 "coin_withdraw_id": 203,
+        //                 "confirmations": 11,
+        //                 "create_time": 1515806440,
+        //                 "status": "finish",
+        //                 "tx_fee": "0",
+        //                 "tx_id": "896371d0e23d64d1cac65a0b7c9e9093d835affb572fec89dd4547277fbdd2f6"
+        //             },
+        //             {
+        //                 "actual_amount": "0.00100000",
+        //                 "amount": "0.00100000",
+        //                 "coin_address": "1GVVx5UBddLKrckTprNi4VhHSymeQ8tsLF",
+        //                 "coin_type": "BCH",
+        //                 "coin_withdraw_id": 27,
+        //                 "confirmations": 0,
+        //                 "create_time": 1513933541,
+        //                 "status": "cancel",
+        //                 "tx_fee": "0",
+        //                 "tx_id": ""
+        //             }
+        //         ],
+        //         "message": "Ok"
+        //     }
+        //
+        return this.parseTransactions (response['data'], currency, since, limit);
+    }
+
+    async fetchDeposits (code = undefined, since = undefined, limit = undefined, params = {}) {
+        if (code === undefined) {
+            throw new ArgumentsRequired (this.id + ' fetchDeposits requires a currency code argument');
+        }
+        const currency = this.currency (code);
+        const request = {
+            'coin_type': currency['id'],
+        };
+        if (limit !== undefined) {
+            request['Limit'] = limit;
+        }
+        const response = await this.privateGetBalanceCoinDeposit (this.extend (request, params));
+        //     {
+        //         "code": 0,
+        //         "data": [
+        //             {
+        //                 "actual_amount": "4.65397682",
+        //                 "actual_amount_display": "4.65397682",
+        //                 "add_explorer": "https://etherscan.io/address/0x361XXXXXX",
+        //                 "amount": "4.65397682",
+        //                 "amount_display": "4.65397682",
+        //                 "coin_address": "0x36dabcdXXXXXX",
+        //                 "coin_address_display": "0x361X*****XXXXX",
+        //                 "coin_deposit_id": 966191,
+        //                 "coin_type": "ETH",
+        //                 "confirmations": 30,
+        //                 "create_time": 1531661445,
+        //                 "explorer": "https://etherscan.io/tx/0x361XXXXXX",
+        //                 "remark": "",
+        //                 "status": "finish",
+        //                 "status_display": "finish",
+        //                 "transfer_method": "onchain",
+        //                 "tx_id": "0x361XXXXXX",
+        //                 "tx_id_display": "0x361XXXXXX"
+        //             }
+        //         ],
+        //         "message": "Ok"
+        //     }
+        //
+        return this.parseTransactions (response['data'], currency, since, limit);
     }
 
     nonce () {

@@ -3,7 +3,7 @@
 //  ---------------------------------------------------------------------------
 
 const Exchange = require ('./base/Exchange');
-const { ExchangeError, ExchangeNotAvailable, InvalidOrder, OrderNotFound } = require ('./base/errors');
+const { ExchangeError, ArgumentsRequired, ExchangeNotAvailable, InvalidOrder, OrderNotFound } = require ('./base/errors');
 
 //  ---------------------------------------------------------------------------
 
@@ -73,6 +73,10 @@ module.exports = class coinone extends Exchange {
                 'QTUM/KRW': { 'id': 'qtum', 'symbol': 'QTUM/KRW', 'base': 'QTUM', 'quote': 'KRW', 'baseId': 'qtum', 'quoteId': 'krw' },
                 'XRP/KRW': { 'id': 'xrp', 'symbol': 'XRP/KRW', 'base': 'XRP', 'quote': 'KRW', 'baseId': 'xrp', 'quoteId': 'krw' },
                 'EOS/KRW': { 'id': 'eos', 'symbol': 'EOS/KRW', 'base': 'EOS', 'quote': 'KRW', 'baseId': 'eos', 'quoteId': 'krw' },
+                'DATA/KRW': { 'id': 'data', 'symbol': 'DATA/KRW', 'base': 'DATA', 'quote': 'KRW', 'baseId': 'data', 'quoteId': 'krw' },
+                'ZIL/KRW': { 'id': 'zil', 'symbol': 'ZIL/KRW', 'base': 'ZIL', 'quote': 'KRW', 'baseId': 'zil', 'quoteId': 'krw' },
+                'KNC/KRW': { 'id': 'knc', 'symbol': 'KNC/KRW', 'base': 'KNC', 'quote': 'KRW', 'baseId': 'knc', 'quoteId': 'krw' },
+                'ZRX/KRW': { 'id': 'zrx', 'symbol': 'ZRX/KRW', 'base': 'ZRX', 'quote': 'KRW', 'baseId': 'zrx', 'quoteId': 'krw' },
             },
             'fees': {
                 'trading': {
@@ -187,9 +191,9 @@ module.exports = class coinone extends Exchange {
         let last = this.safeFloat (ticker, 'last');
         let previousClose = this.safeFloat (ticker, 'yesterday_last');
         let change = undefined;
-        if (typeof last !== 'undefined' && typeof previousClose !== 'undefined')
+        if (last !== undefined && previousClose !== undefined)
             change = previousClose - last;
-        let symbol = (typeof market !== 'undefined') ? market['symbol'] : undefined;
+        let symbol = (market !== undefined) ? market['symbol'] : undefined;
         return {
             'symbol': symbol,
             'timestamp': timestamp,
@@ -216,7 +220,14 @@ module.exports = class coinone extends Exchange {
 
     parseTrade (trade, market = undefined) {
         let timestamp = parseInt (trade['timestamp']) * 1000;
-        let symbol = (typeof market !== 'undefined') ? market['symbol'] : undefined;
+        let symbol = (market !== undefined) ? market['symbol'] : undefined;
+        let is_ask = this.safeString (trade, 'is_ask');
+        let side = undefined;
+        if (is_ask === '1') {
+            side = 'sell';
+        } else if (is_ask === '0') {
+            side = 'buy';
+        }
         return {
             'id': undefined,
             'timestamp': timestamp,
@@ -224,7 +235,7 @@ module.exports = class coinone extends Exchange {
             'order': undefined,
             'symbol': symbol,
             'type': undefined,
-            'side': undefined,
+            'side': side,
             'price': this.safeFloat (trade, 'price'),
             'amount': this.safeFloat (trade, 'qty'),
             'fee': undefined,
@@ -254,6 +265,9 @@ module.exports = class coinone extends Exchange {
         let method = 'privatePostOrder' + this.capitalize (type) + this.capitalize (side);
         let response = await this[method] (this.extend (request, params));
         let id = this.safeString (response, 'orderId');
+        if (id !== undefined) {
+            id = id.toUpperCase ();
+        }
         let timestamp = this.milliseconds ();
         let cost = price * amount;
         let order = {
@@ -282,11 +296,11 @@ module.exports = class coinone extends Exchange {
         await this.loadMarkets ();
         let result = undefined;
         let market = undefined;
-        if (typeof symbol === 'undefined') {
+        if (symbol === undefined) {
             if (id in this.orders) {
                 market = this.market (this.orders[id]['symbol']);
             } else {
-                throw new ExchangeError (this.id + ' fetchOrder() requires a symbol argument for order ids missing in the .orders cache (the order was created with a different instance of this class or within a different run of this code).');
+                throw new ArgumentsRequired (this.id + ' fetchOrder() requires a symbol argument for order ids missing in the .orders cache (the order was created with a different instance of this class or within a different run of this code).');
             }
         } else {
             market = this.market (symbol);
@@ -327,9 +341,11 @@ module.exports = class coinone extends Exchange {
     parseOrder (order, market = undefined) {
         let info = this.safeValue (order, 'info');
         let id = this.safeString (info, 'orderId');
+        if (id !== undefined) {
+            id = id.toUpperCase ();
+        }
         let timestamp = parseInt (info['timestamp']) * 1000;
-        let status = this.safeString (order, 'status');
-        status = this.parseOrderStatus (status);
+        let status = this.parseOrderStatus (this.safeString (order, 'status'));
         let cost = undefined;
         let side = this.safeString (info, 'type');
         if (side.indexOf ('ask') >= 0) {
@@ -341,11 +357,11 @@ module.exports = class coinone extends Exchange {
         let amount = this.safeFloat (info, 'qty');
         let remaining = this.safeFloat (info, 'remainQty');
         let filled = undefined;
-        if (typeof amount !== 'undefined') {
-            if (typeof remaining !== 'undefined') {
+        if (amount !== undefined) {
+            if (remaining !== undefined) {
                 filled = amount - remaining;
             }
-            if (typeof price !== 'undefined') {
+            if (price !== undefined) {
                 cost = price * amount;
             }
         }
@@ -356,12 +372,12 @@ module.exports = class coinone extends Exchange {
             'rate': this.safeFloat (info, 'feeRate'),
         };
         let symbol = undefined;
-        if (typeof market === 'undefined') {
+        if (market === undefined) {
             let marketId = currency.toLowerCase ();
             if (marketId in this.markets_by_id)
                 market = this.markets_by_id[marketId];
         }
-        if (typeof market !== 'undefined')
+        if (market !== undefined)
             symbol = market['symbol'];
         let result = {
             'info': order,
@@ -388,23 +404,23 @@ module.exports = class coinone extends Exchange {
         let amount = undefined;
         let price = undefined;
         let side = undefined;
-        if (typeof order === 'undefined') {
-            if (typeof symbol === 'undefined') {
+        if (order === undefined) {
+            if (symbol === undefined) {
                 // eslint-disable-next-line quotes
                 throw new InvalidOrder (this.id + " cancelOrder could not find the order id " + id + " in orders cache. The order was probably created with a different instance of this class earlier. The `symbol` argument is missing. To cancel the order, pass a symbol argument and {'price': 12345, 'qty': 1.2345, 'is_ask': 0} in the params argument of cancelOrder.");
             }
             price = this.safeFloat (params, 'price');
-            if (typeof price === 'undefined') {
+            if (price === undefined) {
                 // eslint-disable-next-line quotes
                 throw new InvalidOrder (this.id + " cancelOrder could not find the order id " + id + " in orders cache. The order was probably created with a different instance of this class earlier. The `price` parameter is missing. To cancel the order, pass a symbol argument and {'price': 12345, 'qty': 1.2345, 'is_ask': 0} in the params argument of cancelOrder.");
             }
             amount = this.safeFloat (params, 'qty');
-            if (typeof amount === 'undefined') {
+            if (amount === undefined) {
                 // eslint-disable-next-line quotes
                 throw new InvalidOrder (this.id + " cancelOrder could not find the order id " + id + " in orders cache. The order was probably created with a different instance of this class earlier. The `qty` (amount) parameter is missing. To cancel the order, pass a symbol argument and {'price': 12345, 'qty': 1.2345, 'is_ask': 0} in the params argument of cancelOrder.");
             }
             side = this.safeFloat (params, 'is_ask');
-            if (typeof side === 'undefined') {
+            if (side === undefined) {
                 // eslint-disable-next-line quotes
                 throw new InvalidOrder (this.id + " cancelOrder could not find the order id " + id + " in orders cache. The order was probably created with a different instance of this class earlier. The `is_ask` (side) parameter is missing. To cancel the order, pass a symbol argument and {'price': 12345, 'qty': 1.2345, 'is_ask': 0} in the params argument of cancelOrder.");
             }
@@ -421,6 +437,7 @@ module.exports = class coinone extends Exchange {
             'is_ask': side,
             'currency': this.marketId (symbol),
         };
+        this.orders[id]['status'] = 'canceled';
         return await this.privatePostOrderCancel (this.extend (request, params));
     }
 
@@ -454,9 +471,8 @@ module.exports = class coinone extends Exchange {
         return { 'url': url, 'method': method, 'body': body, 'headers': headers };
     }
 
-    handleErrors (code, reason, url, method, headers, body) {
+    handleErrors (code, reason, url, method, headers, body, response) {
         if ((body[0] === '{') || (body[0] === '[')) {
-            let response = JSON.parse (body);
             if ('result' in response) {
                 let result = response['result'];
                 if (result !== 'success') {

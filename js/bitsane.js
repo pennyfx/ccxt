@@ -24,8 +24,8 @@ module.exports = class bitsane extends Exchange {
                 'logo': 'https://user-images.githubusercontent.com/1294454/41387105-d86bf4c6-6f8d-11e8-95ea-2fa943872955.jpg',
                 'api': 'https://bitsane.com/api',
                 'www': 'https://bitsane.com',
-                'doc': 'https://bitsane.com/info-api',
-                'fees': 'https://bitsane.com/fees',
+                'doc': 'https://bitsane.com/help/api',
+                'fees': 'https://bitsane.com/help/fees',
             },
             'api': {
                 'public': {
@@ -128,7 +128,7 @@ module.exports = class bitsane extends Exchange {
         return result;
     }
 
-    async fetchMarkets () {
+    async fetchMarkets (params = {}) {
         let markets = await this.publicGetAssetsPairs ();
         let result = [];
         let marketIds = Object.keys (markets);
@@ -141,7 +141,7 @@ module.exports = class bitsane extends Exchange {
             let limits = this.safeValue (market, 'limits');
             let minLimit = undefined;
             let maxLimit = undefined;
-            if (typeof limits !== 'undefined') {
+            if (limits !== undefined) {
                 minLimit = this.safeFloat (limits, 'minimum');
                 maxLimit = this.safeFloat (limits, 'maximum');
             }
@@ -149,7 +149,6 @@ module.exports = class bitsane extends Exchange {
                 'amount': parseInt (market['precision']),
                 'price': 8,
             };
-            let lot = Math.pow (10, -precision['amount']);
             result.push ({
                 'id': id,
                 'symbol': symbol,
@@ -158,7 +157,6 @@ module.exports = class bitsane extends Exchange {
                 'baseId': market['base'],
                 'quoteId': market['quote'],
                 'active': true,
-                'lot': lot,
                 'precision': precision,
                 'limits': {
                     'amount': {
@@ -199,8 +197,8 @@ module.exports = class bitsane extends Exchange {
             'close': last,
             'last': last,
             'previousClose': undefined,
-            'change': this.safeFloat (ticker, 'percentChange'),
-            'percentage': undefined,
+            'change': undefined,
+            'percentage': this.safeFloat (ticker, 'percentChange'),
             'average': undefined,
             'baseVolume': this.safeFloat (ticker, 'baseVolume'),
             'quoteVolume': this.safeFloat (ticker, 'quoteVolume'),
@@ -226,7 +224,7 @@ module.exports = class bitsane extends Exchange {
         for (let i = 0; i < marketIds.length; i++) {
             let id = marketIds[i];
             let market = this.safeValue (this.marketsById, id);
-            if (typeof market === 'undefined') {
+            if (market === undefined) {
                 continue;
             }
             let symbol = market['symbol'];
@@ -236,7 +234,7 @@ module.exports = class bitsane extends Exchange {
         return result;
     }
 
-    async fetchOrderBook (symbol, params = {}) {
+    async fetchOrderBook (symbol, limit = undefined, params = {}) {
         await this.loadMarkets ();
         let response = await this.publicGetOrderbook (this.extend ({
             'pair': this.marketId (symbol),
@@ -272,9 +270,9 @@ module.exports = class bitsane extends Exchange {
         let request = {
             'pair': market['id'],
         };
-        if (typeof since !== 'undefined')
+        if (since !== undefined)
             request['since'] = parseInt (since / 1000);
-        if (typeof limit !== 'undefined')
+        if (limit !== undefined)
             request['limit'] = limit;
         let response = await this.publicGetTrades (this.extend (request, params));
         return this.parseTrades (response['result'], market, since, limit);
@@ -394,6 +392,7 @@ module.exports = class bitsane extends Exchange {
         return {
             'currency': code,
             'address': address,
+            'tag': undefined,
             'info': response,
         };
     }
@@ -425,25 +424,26 @@ module.exports = class bitsane extends Exchange {
             body = this.extend ({
                 'nonce': this.nonce (),
             }, params);
-            body = this.stringToBase64 (this.json (body));
+            let payload = this.json (body);
+            let payload64 = this.stringToBase64 (this.encode (payload));
+            body = this.decode (payload64);
             headers = {
                 'X-BS-APIKEY': this.apiKey,
                 'X-BS-PAYLOAD': body,
-                'X-BS-SIGNATURE': this.hmac (this.encode (body), this.encode (this.secret), 'sha384'),
+                'X-BS-SIGNATURE': this.hmac (payload64, this.encode (this.secret), 'sha384'),
             };
         }
         return { 'url': url, 'method': method, 'body': body, 'headers': headers };
     }
 
-    handleErrors (httpCode, reason, url, method, headers, body) {
+    handleErrors (httpCode, reason, url, method, headers, body, response) {
         if (typeof body !== 'string')
             return; // fallback to default error handler
         if (body.length < 2)
             return; // fallback to default error handler
         if ((body[0] === '{') || (body[0] === '[')) {
-            let response = JSON.parse (body);
             let statusCode = this.safeString (response, 'statusCode');
-            if (typeof statusCode !== 'undefined') {
+            if (statusCode !== undefined) {
                 if (statusCode !== '0') {
                     const feedback = this.id + ' ' + this.json (response);
                     const exceptions = this.exceptions;

@@ -70,7 +70,7 @@ class flowbtc extends Exchange {
         ));
     }
 
-    public function fetch_markets () {
+    public function fetch_markets ($params = array ()) {
         $response = $this->publicPostGetProductPairs ();
         $markets = $response['productPairs'];
         $result = array ();
@@ -195,10 +195,6 @@ class flowbtc extends Exchange {
             'startIndex' => -1,
         ), $params));
         return $this->parse_trades($response['trades'], $market, $since, $limit);
-    }
-
-    public function price_to_precision ($symbol, $price) {
-        return $this->decimal_to_precision($price, ROUND, $this->markets[$symbol]['precision']['price'], $this->precisionMode);
     }
 
     public function create_order ($symbol, $type, $side, $amount, $price = null, $params = array ()) {

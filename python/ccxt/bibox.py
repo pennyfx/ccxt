@@ -13,10 +13,10 @@ except NameError:
     basestring = str  # Python 2
 import hashlib
 import math
-import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import AuthenticationError
 from ccxt.base.errors import PermissionDenied
+from ccxt.base.errors import ArgumentsRequired
 from ccxt.base.errors import InsufficientFunds
 from ccxt.base.errors import InvalidOrder
 from ccxt.base.errors import OrderNotFound
@@ -67,6 +67,7 @@ class bibox (Exchange):
                     'https://github.com/Biboxcom/api_reference/wiki/api_reference',
                 ],
                 'fees': 'https://bibox.zendesk.com/hc/en-us/articles/115004417013-Fee-Structure-on-Bibox',
+                'referral': 'https://www.bibox.com/signPage?id=11114745&lang=en',
             },
             'api': {
                 'public': {
@@ -91,7 +92,7 @@ class bibox (Exchange):
                     'tierBased': False,
                     'percentage': True,
                     'taker': 0.001,
-                    'maker': 0.0,
+                    'maker': 0.001,
                 },
                 'funding': {
                     'tierBased': False,
@@ -107,6 +108,7 @@ class bibox (Exchange):
                 '2033': OrderNotFound,  # operation failednot  Orders have been completed or revoked
                 '2067': InvalidOrder,  # Does not support market orders
                 '2068': InvalidOrder,  # The number of orders can not be less than
+                '2085': InvalidOrder,  # Order quantity is too small
                 '3012': AuthenticationError,  # invalid apiKey
                 '3024': PermissionDenied,  # wrong apikey permissions
                 '3025': AuthenticationError,  # signature failed
@@ -115,6 +117,7 @@ class bibox (Exchange):
             },
             'commonCurrencies': {
                 'KEY': 'Bihu',
+                'PAI': 'PCHAIN',
             },
         })
 
@@ -131,7 +134,7 @@ class bibox (Exchange):
             base = self.common_currency_code(baseId)
             quote = self.common_currency_code(quoteId)
             symbol = base + '/' + quote
-            id = base + '_' + quote
+            id = baseId + '_' + quoteId
             precision = {
                 'amount': 4,
                 'price': 8,
@@ -145,7 +148,6 @@ class bibox (Exchange):
                 'quoteId': quote,
                 'active': True,
                 'info': market,
-                'lot': math.pow(10, -precision['amount']),
                 'precision': precision,
                 'limits': {
                     'amount': {
@@ -180,13 +182,14 @@ class bibox (Exchange):
         open = None
         if (last is not None) and(change is not None):
             open = last - change
-        iso8601 = None
-        if timestamp is not None:
-            iso8601 = self.iso8601(timestamp)
+        percentage = self.safe_string(ticker, 'percent')
+        if percentage is not None:
+            percentage = percentage.replace('%', '')
+            percentage = float(percentage)
         return {
             'symbol': symbol,
             'timestamp': timestamp,
-            'datetime': iso8601,
+            'datetime': self.iso8601(timestamp),
             'high': self.safe_float(ticker, 'high'),
             'low': self.safe_float(ticker, 'low'),
             'bid': self.safe_float(ticker, 'buy'),
@@ -199,7 +202,7 @@ class bibox (Exchange):
             'last': last,
             'previousClose': None,
             'change': change,
-            'percentage': self.safe_string(ticker, 'percent'),
+            'percentage': percentage,
             'average': None,
             'baseVolume': baseVolume,
             'quoteVolume': self.safe_float(ticker, 'amount'),
@@ -218,14 +221,17 @@ class bibox (Exchange):
     def parse_tickers(self, rawTickers, symbols=None):
         tickers = []
         for i in range(0, len(rawTickers)):
-            tickers.append(self.parse_ticker(rawTickers[i]))
-        return self.filter_by_array(tickers, 'symbol', symbols)
+            ticker = self.parse_ticker(rawTickers[i])
+            if (symbols is None) or (self.in_array(ticker['symbol'], symbols)):
+                tickers.append(ticker)
+        return tickers
 
     def fetch_tickers(self, symbols=None, params={}):
         response = self.publicGetMdata(self.extend({
             'cmd': 'marketAll',
         }, params))
-        return self.parse_tickers(response['result'], symbols)
+        tickers = self.parse_tickers(response['result'], symbols)
+        return self.index_by(tickers, 'symbol')
 
     def parse_trade(self, trade, market=None):
         timestamp = self.safe_integer(trade, 'time')
@@ -462,11 +468,10 @@ class bibox (Exchange):
         type = 'market' if (order['order_type'] == 1) else 'limit'
         timestamp = order['createdAt']
         price = self.safe_float(order, 'price')
-        price = self.safe_float(order, 'deal_price', price)
+        average = self.safe_float(order, 'deal_price')
         filled = self.safe_float(order, 'deal_amount')
         amount = self.safe_float(order, 'amount')
-        cost = self.safe_float(order, 'money')
-        cost = self.safe_float(order, 'deal_money', cost)
+        cost = self.safe_float_2(order, 'deal_money', 'money')
         remaining = None
         if filled is not None:
             if amount is not None:
@@ -474,9 +479,7 @@ class bibox (Exchange):
             if cost is None:
                 cost = price * filled
         side = 'buy' if (order['order_side'] == 1) else 'sell'
-        status = self.safe_string(order, 'status')
-        if status is not None:
-            status = self.parse_order_status(status)
+        status = self.parse_order_status(self.safe_string(order, 'status'))
         result = {
             'info': order,
             'id': self.safe_string(order, 'id'),
@@ -489,6 +492,7 @@ class bibox (Exchange):
             'price': price,
             'amount': amount,
             'cost': cost if cost else float(price) * filled,
+            'average': average,
             'filled': filled,
             'remaining': remaining,
             'status': status,
@@ -506,7 +510,7 @@ class bibox (Exchange):
             '5': 'canceled',  # canceled
             '6': 'canceled',  # canceling
         }
-        return self.safe_string(statuses, status, status.lower())
+        return self.safe_string(statuses, status, status)
 
     def fetch_open_orders(self, symbol=None, since=None, limit=None, params={}):
         market = None
@@ -530,7 +534,7 @@ class bibox (Exchange):
 
     def fetch_closed_orders(self, symbol=None, since=None, limit=200, params={}):
         if symbol is None:
-            raise ExchangeError(self.id + ' fetchClosedOrders requires a symbol argument')
+            raise ArgumentsRequired(self.id + ' fetchClosedOrders requires a symbol argument')
         self.load_markets()
         market = self.market(symbol)
         response = self.privatePostOrderpending({
@@ -547,7 +551,7 @@ class bibox (Exchange):
 
     def fetch_my_trades(self, symbol=None, since=None, limit=None, params={}):
         if symbol is None:
-            raise ExchangeError(self.id + ' fetchMyTrades requires a symbol argument')
+            raise ArgumentsRequired(self.id + ' fetchMyTrades requires a symbol argument')
         self.load_markets()
         market = self.market(symbol)
         size = limit if (limit) else 200
@@ -558,6 +562,8 @@ class bibox (Exchange):
                 'account_type': 0,  # 0 - regular, 1 - margin
                 'page': 1,
                 'size': size,
+                'coin_symbol': market['baseId'],
+                'currency_symbol': market['quoteId'],
             }, params),
         })
         trades = self.safe_value(response['result'], 'items', [])
@@ -573,9 +579,12 @@ class bibox (Exchange):
             }, params),
         })
         address = self.safe_string(response, 'result')
+        tag = None  # todo: figure self out
         result = {
-            'info': response,
+            'currency': code,
             'address': address,
+            'tag': tag,
+            'info': response,
         }
         return result
 
@@ -606,8 +615,8 @@ class bibox (Exchange):
         }
 
     def fetch_funding_fees(self, codes=None, params={}):
-        #  by default it will try load withdrawal fees of all currencies(with separate requests)
-        #  however if you define codes = ['ETH', 'BTC'] in args it will only load those
+        # by default it will try load withdrawal fees of all currencies(with separate requests)
+        # however if you define codes = ['ETH', 'BTC'] in args it will only load those
         self.load_markets()
         withdrawFees = {}
         info = {}
@@ -650,10 +659,9 @@ class bibox (Exchange):
         headers = {'Content-Type': 'application/json'}
         return {'url': url, 'method': method, 'body': body, 'headers': headers}
 
-    def handle_errors(self, code, reason, url, method, headers, body):
+    def handle_errors(self, code, reason, url, method, headers, body, response):
         if len(body) > 0:
             if body[0] == '{':
-                response = json.loads(body)
                 if 'error' in response:
                     if 'code' in response['error']:
                         code = self.safe_string(response['error'], 'code')

@@ -22,6 +22,9 @@ class cryptopia extends Exchange {
                 'fetchCurrencies' => true,
                 'fetchDepositAddress' => true,
                 'fetchMyTrades' => true,
+                'fetchTransactions' => false,
+                'fetchWithdrawals' => true,
+                'fetchDeposits' => true,
                 'fetchOHLCV' => true,
                 'fetchOrder' => 'emulated',
                 'fetchOrderBooks' => true,
@@ -97,21 +100,26 @@ class cryptopia extends Exchange {
             'commonCurrencies' => array (
                 'ACC' => 'AdCoin',
                 'BAT' => 'BatCoin',
+                'BEAN' => 'BITB', // rebranding, see issue #3380
                 'BLZ' => 'BlazeCoin',
                 'BTG' => 'Bitgem',
-                'CAN' => 'CanYa',
+                'CAN' => 'CanYaCoin',
                 'CAT' => 'Catcoin',
                 'CC' => 'CCX',
                 'CMT' => 'Comet',
                 'EPC' => 'ExperienceCoin',
                 'FCN' => 'Facilecoin',
+                'FT' => 'Fabric Token',
                 'FUEL' => 'FC2', // FuelCoin != FUEL
                 'HAV' => 'Havecoin',
+                'HC' => 'Harvest Masternode Coin', // != HyperCash
+                'HSR' => 'HC',
                 'KARM' => 'KARMA',
                 'LBTC' => 'LiteBitcoin',
                 'LDC' => 'LADACoin',
                 'MARKS' => 'Bitmark',
                 'NET' => 'NetCoin',
+                'PLC' => 'Polcoin',
                 'RED' => 'RedCoin',
                 'STC' => 'StopTrumpCoin',
                 'QBT' => 'Cubits',
@@ -123,19 +131,20 @@ class cryptopia extends Exchange {
         ));
     }
 
-    public function fetch_markets () {
+    public function fetch_markets ($params = array ()) {
         $response = $this->publicGetGetTradePairs ();
         $result = array ();
         $markets = $response['Data'];
         for ($i = 0; $i < count ($markets); $i++) {
             $market = $markets[$i];
-            $id = $market['Id'];
-            $symbol = $market['Label'];
+            $numericId = $market['Id'];
+            $label = $market['Label'];
             $baseId = $market['Symbol'];
             $quoteId = $market['BaseSymbol'];
             $base = $this->common_currency_code($baseId);
             $quote = $this->common_currency_code($quoteId);
             $symbol = $base . '/' . $quote;
+            $id = $baseId . '_' . $quoteId;
             $precision = array (
                 'amount' => 8,
                 'price' => 8,
@@ -161,7 +170,7 @@ class cryptopia extends Exchange {
             $result[] = array (
                 'id' => $id,
                 'symbol' => $symbol,
-                'label' => $market['Label'],
+                'numericId' => $numericId,
                 'base' => $base,
                 'quote' => $quote,
                 'baseId' => $baseId,
@@ -169,10 +178,10 @@ class cryptopia extends Exchange {
                 'info' => $market,
                 'maker' => $market['TradeFee'] / 100,
                 'taker' => $market['TradeFee'] / 100,
-                'lot' => $limits['amount']['min'],
                 'active' => $active,
                 'precision' => $precision,
                 'limits' => $limits,
+                'label' => $label,
             );
         }
         $this->options['marketsByLabel'] = $this->index_by($result, 'label');
@@ -212,7 +221,7 @@ class cryptopia extends Exchange {
         $this->load_markets();
         $market = $this->market ($symbol);
         $request = array (
-            'tradePairId' => $market['id'],
+            'tradePairId' => $market['numericId'],
             'dataRange' => $dataRange,
             'dataGroup' => $this->timeframes[$timeframe],
         );
@@ -250,7 +259,7 @@ class cryptopia extends Exchange {
         $result = array ();
         for ($i = 0; $i < count ($orderbooks); $i++) {
             $orderbook = $orderbooks[$i];
-            $id = $this->safe_integer($orderbook, 'TradePairId');
+            $id = $this->safe_string($orderbook, 'Market');
             $symbol = $id;
             if (is_array ($this->markets_by_id) && array_key_exists ($id, $this->markets_by_id)) {
                 $market = $this->markets_by_id[$id];
@@ -264,7 +273,7 @@ class cryptopia extends Exchange {
     public function parse_ticker ($ticker, $market = null) {
         $timestamp = $this->milliseconds ();
         $symbol = null;
-        if ($market)
+        if ($market !== null)
             $symbol = $market['symbol'];
         $open = $this->safe_float($ticker, 'Open');
         $last = $this->safe_float($ticker, 'LastPrice');
@@ -317,7 +326,7 @@ class cryptopia extends Exchange {
         $tickers = $response['Data'];
         for ($i = 0; $i < count ($tickers); $i++) {
             $ticker = $tickers[$i];
-            $id = $ticker['TradePairId'];
+            $id = str_replace ('/', '_', $ticker['Label']);
             $recognized = (is_array ($this->markets_by_id) && array_key_exists ($id, $this->markets_by_id));
             if (!$recognized) {
                 if ($this->options['fetchTickersErrors'])
@@ -344,9 +353,11 @@ class cryptopia extends Exchange {
         $cost = $this->safe_float($trade, 'Total');
         $id = $this->safe_string($trade, 'TradeId');
         if ($market === null) {
-            if (is_array ($trade) && array_key_exists ('TradePairId', $trade))
-                if (is_array ($this->markets_by_id) && array_key_exists ($trade['TradePairId'], $this->markets_by_id))
-                    $market = $this->markets_by_id[$trade['TradePairId']];
+            $marketId = $this->safe_string($trade, 'Market');
+            $marketId = str_replace ('/', '_', $marketId);
+            if (is_array ($this->markets_by_id) && array_key_exists ($marketId, $this->markets_by_id)) {
+                $market = $this->markets_by_id[$marketId];
+            }
         }
         $symbol = null;
         $fee = null;
@@ -393,13 +404,117 @@ class cryptopia extends Exchange {
         return $this->parse_trades($trades, $market, $since, $limit);
     }
 
+    public function parse_transaction ($transaction, $currency = null) {
+        //
+        // fetchWithdrawals
+        //
+        //     {
+        //         Id => 937355,
+        //         Currency => 'BTC',
+        //         TxId => '5ba7784576cee48bfb9d1524abf7bdade3de65e0f2f9cdd25f7bef2c506cf296',
+        //         Type => 'Withdraw',
+        //         Amount => 0.7,
+        //         Fee => 0,
+        //         Status => 'Complete',
+        //         Confirmations => 0,
+        //         Timestamp => '2017-10-10T18:39:03.8928376',
+        //         Address => '14KyZTusAZZGEmZzxsWf4pee7ThtA2iv2E',
+        //     }
+        //
+        // fetchDeposits
+        //     {
+        //         Id => 7833741,
+        //         Currency => 'BCH',
+        //         TxId => '0000000000000000011865af4122fe3b144e2cbeea86142e8ff2fb4107352d43',
+        //         Type => 'Deposit',
+        //         Amount => 0.0003385,
+        //         Fee => 0,
+        //         Status => 'Confirmed',
+        //         Confirmations => 6,
+        //         Timestamp => '2017-08-01T16:19:24',
+        //         Address => null
+        //     }
+        //
+        $timestamp = $this->parse8601 ($this->safe_string($transaction, 'Timestamp'));
+        $code = null;
+        $currencyId = $this->safe_string($transaction, 'Currency');
+        $currency = $this->safe_value($this->currencies_by_id, $currencyId);
+        if ($currency === null) {
+            $code = $this->common_currency_code($currencyId);
+        }
+        if ($currency !== null) {
+            $code = $currency['code'];
+        }
+        $status = $this->safe_string($transaction, 'Status');
+        $txid = $this->safe_string($transaction, 'TxId');
+        if ($status !== null) {
+            $status = $this->parse_transaction_status ($status);
+        }
+        $id = $this->safe_string($transaction, 'Id');
+        $type = $this->parse_transaction_type ($this->safe_string($transaction, 'Type'));
+        $amount = $this->safe_float($transaction, 'Amount');
+        $address = $this->safe_string($transaction, 'Address');
+        $feeCost = $this->safe_float($transaction, 'Fee');
+        return array (
+            'info' => $transaction,
+            'id' => $id,
+            'currency' => $code,
+            'amount' => $amount,
+            'address' => $address,
+            'tag' => null,
+            'status' => $status,
+            'type' => $type,
+            'updated' => null,
+            'txid' => $txid,
+            'timestamp' => $timestamp,
+            'datetime' => $this->iso8601 ($timestamp),
+            'fee' => array (
+                'currency' => $code,
+                'cost' => $feeCost,
+            ),
+        );
+    }
+
+    public function parse_transaction_status ($status) {
+        $statuses = array (
+            'Confirmed' => 'ok',
+            'Complete' => 'ok',
+            'Pending' => 'pending',
+        );
+        return $this->safe_string($statuses, $status, $status);
+    }
+
+    public function parse_transaction_type ($type) {
+        $types = array (
+            'Withdraw' => 'withdrawal',
+            'Deposit' => 'deposit',
+        );
+        return $this->safe_string($types, $type, $type);
+    }
+
+    public function fetch_transactions_by_type ($type, $code = null, $since = null, $limit = null, $params = array ()) {
+        $request = array (
+            'type' => ($type === 'deposit') ? 'Deposit' : 'Withdraw',
+        );
+        $response = $this->privatePostGetTransactions (array_merge ($request, $params));
+        return $this->parseTransactions ($response['Data'], $code, $since, $limit);
+    }
+
+    public function fetch_withdrawals ($code = null, $since = null, $limit = null, $params = array ()) {
+        return $this->fetch_transactions_by_type ('withdrawal', $code, $since, $limit, $params);
+    }
+
+    public function fetch_deposits ($code = null, $since = null, $limit = null, $params = array ()) {
+        return $this->fetch_transactions_by_type ('deposit', $code, $since, $limit, $params);
+    }
+
     public function fetch_my_trades ($symbol = null, $since = null, $limit = null, $params = array ()) {
         $this->load_markets();
         $request = array ();
         $market = null;
         if ($symbol !== null) {
             $market = $this->market ($symbol);
-            $request['TradePairId'] = $market['id'];
+            $request['Market'] = $market['id'];
         }
         if ($limit !== null) {
             $request['Count'] = $limit; // default 100
@@ -484,7 +599,7 @@ class cryptopia extends Exchange {
         // $price = floatval ($price);
         // $amount = floatval ($amount);
         $request = array (
-            'TradePairId' => $market['id'],
+            'Market' => $market['id'],
             'Type' => $this->capitalize ($side),
             // 'Rate' => $this->price_to_precision($symbol, $price),
             // 'Amount' => $this->amount_to_precision($symbol, $amount),
@@ -570,11 +685,7 @@ class cryptopia extends Exchange {
                 }
             }
         }
-        $timestamp = $this->parse8601 ($order, 'TimeStamp');
-        $datetime = null;
-        if ($timestamp) {
-            $datetime = $this->iso8601 ($timestamp);
-        }
+        $timestamp = $this->parse8601 ($this->safe_string($order, 'TimeStamp'));
         $amount = $this->safe_float($order, 'Amount');
         $remaining = $this->safe_float($order, 'Remaining');
         $filled = null;
@@ -593,7 +704,7 @@ class cryptopia extends Exchange {
             'id' => $id,
             'info' => $this->omit ($order, 'status'),
             'timestamp' => $timestamp,
-            'datetime' => $datetime,
+            'datetime' => $this->iso8601 ($timestamp),
             'lastTradeTimestamp' => null,
             'status' => $this->safe_string($order, 'status'),
             'symbol' => $symbol,
@@ -619,7 +730,7 @@ class cryptopia extends Exchange {
         );
         if ($symbol !== null) {
             $market = $this->market ($symbol);
-            $request['TradePairId'] = $market['id'];
+            $request['Market'] = $market['id'];
         }
         $response = $this->privatePostGetOpenOrders (array_merge ($request, $params));
         $orders = array ();
@@ -694,12 +805,21 @@ class cryptopia extends Exchange {
             'Currency' => $currency['id'],
         ), $params));
         $address = $this->safe_string($response['Data'], 'BaseAddress');
-        if (!$address)
-            $address = $this->safe_string($response['Data'], 'Address');
+        $tag = $this->safe_string($response['Data'], 'Address');
+        if ($address !== null) {
+            if (strlen ($address) < 1) {
+                $address = null;
+            }
+        }
+        if ($address === null) {
+            $address = $tag;
+            $tag = null;
+        }
         $this->check_address($address);
         return array (
             'currency' => $code,
             'address' => $address,
+            'tag' => $tag,
             'info' => $response,
         );
     }
@@ -752,51 +872,36 @@ class cryptopia extends Exchange {
         return $this->milliseconds ();
     }
 
-    public function handle_errors ($code, $reason, $url, $method, $headers, $body) {
-        if (gettype ($body) !== 'string')
+    public function handle_errors ($code, $reason, $url, $method, $headers, $body, $response) {
+        if ($response === null) {
             return; // fallback to default $error handler
-        if (strlen ($body) < 2)
-            return; // fallback to default $error handler
-        $fixedJSONString = $this->sanitize_broken_json_string ($body);
-        if ($fixedJSONString[0] === '{') {
-            $response = json_decode ($fixedJSONString, $as_associative_array = true);
-            if (is_array ($response) && array_key_exists ('Success', $response)) {
-                $success = $this->safe_value($response, 'Success');
-                if ($success !== null) {
-                    if (!$success) {
-                        $error = $this->safe_string($response, 'Error');
-                        $feedback = $this->id;
-                        if (gettype ($error) === 'string') {
-                            $feedback = $feedback . ' ' . $error;
-                            if (mb_strpos ($error, 'does not exist') !== false) {
-                                throw new OrderNotFound ($feedback);
-                            }
-                            if (mb_strpos ($error, 'Insufficient Funds') !== false) {
-                                throw new InsufficientFunds ($feedback);
-                            }
-                            if (mb_strpos ($error, 'Nonce has already been used') !== false) {
-                                throw new InvalidNonce ($feedback);
-                            }
-                        } else {
-                            $feedback = $feedback . ' ' . $fixedJSONString;
+        }
+        if (is_array ($response) && array_key_exists ('Success', $response)) {
+            $success = $this->safe_value($response, 'Success');
+            if ($success !== null) {
+                if (!$success) {
+                    $error = $this->safe_string($response, 'Error');
+                    $feedback = $this->id . ' ' . $body;
+                    if (gettype ($error) === 'string') {
+                        if (mb_strpos ($error, 'Invalid trade amount') !== false) {
+                            throw new InvalidOrder ($feedback);
                         }
-                        throw new ExchangeError ($feedback);
+                        if (mb_strpos ($error, 'No matching trades found') !== false) {
+                            throw new OrderNotFound ($feedback);
+                        }
+                        if (mb_strpos ($error, 'does not exist') !== false) {
+                            throw new OrderNotFound ($feedback);
+                        }
+                        if (mb_strpos ($error, 'Insufficient Funds') !== false) {
+                            throw new InsufficientFunds ($feedback);
+                        }
+                        if (mb_strpos ($error, 'Nonce has already been used') !== false) {
+                            throw new InvalidNonce ($feedback);
+                        }
                     }
+                    throw new ExchangeError ($feedback);
                 }
             }
         }
-    }
-
-    public function sanitize_broken_json_string ($jsonString) {
-        // sometimes cryptopia will return a unicode symbol before actual JSON string.
-        $indexOfBracket = mb_strpos ($jsonString, '{');
-        if ($indexOfBracket >= 0) {
-            return mb_substr ($jsonString, $indexOfBracket);
-        }
-        return $jsonString;
-    }
-
-    public function parse_json ($response, $responseBody, $url, $method) {
-        return parent::parseJson ($response, $this->sanitize_broken_json_string ($responseBody), $url, $method);
     }
 }

@@ -85,10 +85,10 @@ class itbit (Exchange):
         ticker = self.publicGetMarketsSymbolTicker(self.extend({
             'symbol': self.market_id(symbol),
         }, params))
-        serverTimeUTC = ('serverTimeUTC' in list(ticker.keys()))
+        serverTimeUTC = self.safe_string(ticker, 'serverTimeUTC')
         if not serverTimeUTC:
             raise ExchangeError(self.id + ' fetchTicker returned a bad response: ' + self.json(ticker))
-        timestamp = self.parse8601(ticker['serverTimeUTC'])
+        timestamp = self.parse8601(serverTimeUTC)
         vwap = self.safe_float(ticker, 'vwap24h')
         baseVolume = self.safe_float(ticker, 'volume24h')
         quoteVolume = None
@@ -158,10 +158,10 @@ class itbit (Exchange):
         return self.parse_balance(result)
 
     def fetch_wallets(self, params={}):
-        if not self.userId:
-            raise AuthenticationError(self.id + ' fetchWallets requires userId in API settings')
+        if not self.uid:
+            raise AuthenticationError(self.id + ' fetchWallets requires uid API credential')
         request = {
-            'userId': self.userId,
+            'userId': self.uid,
         }
         return self.privateGetWallets(self.extend(request, params))
 
@@ -253,9 +253,9 @@ class itbit (Exchange):
         walletIdInParams = ('walletId' in list(params.keys()))
         if not walletIdInParams:
             raise ExchangeError(self.id + ' fetchOrder requires a walletId parameter')
-        return self.privateGetWalletsWalletIdOrdersId(self.extend({
-            'id': id,
-        }, params))
+        request = {'id': id}
+        response = self.privateGetWalletsWalletIdOrdersId(self.extend(request, params))
+        return self.parse_order(response)
 
     def cancel_order(self, id, symbol=None, params={}):
         walletIdInParams = ('walletId' in list(params.keys()))
@@ -281,7 +281,8 @@ class itbit (Exchange):
             auth = [method, url, body, nonce, timestamp]
             message = nonce + self.json(auth).replace('\\/', '/')
             hash = self.hash(self.encode(message), 'sha256', 'binary')
-            binhash = self.binary_concat(url, hash)
+            binaryUrl = self.encode(url)
+            binhash = self.binary_concat(binaryUrl, hash)
             signature = self.hmac(binhash, self.encode(self.secret), hashlib.sha512, 'base64')
             headers = {
                 'Authorization': self.apiKey + ':' + signature,

@@ -20,7 +20,6 @@ class xbtce (Exchange):
             'rateLimit': 2000,  # responses are cached every 2 seconds
             'version': 'v1',
             'has': {
-                'publicAPI': False,
                 'CORS': False,
                 'fetchTickers': True,
                 'createMarketOrder': False,
@@ -108,7 +107,7 @@ class xbtce (Exchange):
             },
         })
 
-    def fetch_markets(self):
+    def fetch_markets(self, params={}):
         markets = self.privateGetSymbol()
         result = []
         for p in range(0, len(markets)):

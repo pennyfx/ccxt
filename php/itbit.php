@@ -85,10 +85,10 @@ class itbit extends Exchange {
         $ticker = $this->publicGetMarketsSymbolTicker (array_merge (array (
             'symbol' => $this->market_id($symbol),
         ), $params));
-        $serverTimeUTC = (is_array ($ticker) && array_key_exists ('serverTimeUTC', $ticker));
+        $serverTimeUTC = $this->safe_string($ticker, 'serverTimeUTC');
         if (!$serverTimeUTC)
             throw new ExchangeError ($this->id . ' fetchTicker returned a bad response => ' . $this->json ($ticker));
-        $timestamp = $this->parse8601 ($ticker['serverTimeUTC']);
+        $timestamp = $this->parse8601 ($serverTimeUTC);
         $vwap = $this->safe_float($ticker, 'vwap24h');
         $baseVolume = $this->safe_float($ticker, 'volume24h');
         $quoteVolume = null;
@@ -163,10 +163,10 @@ class itbit extends Exchange {
     }
 
     public function fetch_wallets ($params = array ()) {
-        if (!$this->userId)
-            throw new AuthenticationError ($this->id . ' fetchWallets requires userId in API settings');
+        if (!$this->uid)
+            throw new AuthenticationError ($this->id . ' fetchWallets requires uid API credential');
         $request = array (
-            'userId' => $this->userId,
+            'userId' => $this->uid,
         );
         return $this->privateGetWallets (array_merge ($request, $params));
     }
@@ -264,11 +264,12 @@ class itbit extends Exchange {
 
     public function fetch_order ($id, $symbol = null, $params = array ()) {
         $walletIdInParams = (is_array ($params) && array_key_exists ('walletId', $params));
-        if (!$walletIdInParams)
+        if (!$walletIdInParams) {
             throw new ExchangeError ($this->id . ' fetchOrder requires a walletId parameter');
-        return $this->privateGetWalletsWalletIdOrdersId (array_merge (array (
-            'id' => $id,
-        ), $params));
+        }
+        $request = array ( 'id' => $id );
+        $response = $this->privateGetWalletsWalletIdOrdersId (array_merge ($request, $params));
+        return $this->parse_order($response);
     }
 
     public function cancel_order ($id, $symbol = null, $params = array ()) {
@@ -296,7 +297,8 @@ class itbit extends Exchange {
             $auth = array ( $method, $url, $body, $nonce, $timestamp );
             $message = $nonce . str_replace ('\\/', '/', $this->json ($auth));
             $hash = $this->hash ($this->encode ($message), 'sha256', 'binary');
-            $binhash = $this->binary_concat($url, $hash);
+            $binaryUrl = $this->encode ($url);
+            $binhash = $this->binary_concat($binaryUrl, $hash);
             $signature = $this->hmac ($binhash, $this->encode ($this->secret), 'sha512', 'base64');
             $headers = array (
                 'Authorization' => $this->apiKey . ':' . $signature,
